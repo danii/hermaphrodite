@@ -6,32 +6,80 @@ use self::super::{
 	},
 	types::{Read, Write}
 };
+use enum_dispatch::enum_dispatch;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::to_string;
 use std::{
 	fmt::Debug, io::{Error, ErrorKind, Result}, result::Result as STDResult
 };
 
-pub fn deserialize(reader: &mut impl Read, state: State, packet: u32,
-		bound: Bound) -> Option<Result<Box<dyn Packet>>> {
-	Some(match (state, packet, bound) {
-		(HandshakeState, 0, Server) => Handshake::deserialize(reader),
-		(StatusState, 0, Server) => StatusRequest::deserialize(reader),
-		(StatusState, 1, Server) => StatusPing::deserialize(reader),
-		(StatusState, 0, Client) => StatusResponse::deserialize(reader),
-		(StatusState, 1, Client) => StatusPong::deserialize(reader),
-		_ => return None
-	})
-}
-
+#[enum_dispatch]
 pub trait Packet: Debug {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>>
-		where Self: Sized;
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()>;
-	fn packet_info(&self) -> &'static (State, u32);
 
 	fn next_state(&self) -> Option<State> {
 		None
+	}
+}
+
+pub trait PacketNonObject: Packet + Sized {
+	const PACKET_STATE: State;
+	const PACKET_BOUND: Bound;
+	const PACKET_ID: u32;
+
+	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum>;
+}
+
+#[enum_dispatch(Packet)]
+#[derive(Debug)]
+pub enum PacketEnum {
+	Handshake,
+	StatusRequest,
+	StatusResponse,
+	StatusPing,
+	StatusPong,
+	LoginStart,
+	LoginCompression,
+	LoginSuccess
+}
+
+macro deserialize_match($match_against:expr, $reader:ident, $($typ:ty),*) {
+	match $match_against {
+		$(
+			(<$typ>::PACKET_STATE, <$typ>::PACKET_ID, <$typ>::PACKET_BOUND)
+				=> <$typ>::deserialize($reader),
+		)*
+		_ => return None
+	}
+}
+
+macro packet_info_match($selff:ident, $($typ:ident:$typ2:path),*) {
+	match $selff {
+		$(
+			$typ2 (_) =>
+				($typ::PACKET_STATE, $typ::PACKET_BOUND, $typ::PACKET_ID),
+		)*
+	}
+}
+
+impl PacketEnum {
+	pub fn deserialize(reader: &mut impl Read, state: State, bound: Bound,
+			packet: u32) -> Option<Result<Self>> {
+		Some(deserialize_match!(
+			(state, packet, bound), reader,
+			Handshake, StatusRequest, StatusResponse, StatusPing, StatusPong,
+			LoginStart, LoginCompression, LoginSuccess
+		))
+	}
+
+	pub fn packet_info(&self) -> (State, Bound, u32) {
+		packet_info_match!(
+			self,
+			Handshake:Self::Handshake, StatusRequest:Self::StatusRequest,
+			StatusResponse:Self::StatusResponse, StatusPing:Self::StatusPing,
+			StatusPong:Self::StatusPong, LoginStart:Self::LoginStart,
+			LoginCompression:Self::LoginCompression, LoginSuccess:Self::LoginSuccess
+		)
 	}
 }
 
@@ -43,8 +91,22 @@ pub struct Handshake {
 }
 
 impl Packet for Handshake {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
-		Ok(Box::new(Self {
+	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
+		todo!()
+	}
+
+	fn next_state(&self) -> Option<State> {
+		Some(self.next_state)
+	}
+}
+
+impl PacketNonObject for Handshake {
+	const PACKET_STATE: State = HandshakeState;
+	const PACKET_BOUND: Bound = Server;
+	const PACKET_ID: u32 = 0;
+
+	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
+		Ok(PacketEnum::from(Self {
 			protocol_version: reader.variable_integer()? as u32,
 			address: (reader.string()?, reader.unsigned_short()?),
 			next_state: match reader.variable_integer()? {
@@ -55,34 +117,24 @@ impl Packet for Handshake {
 			}
 		}))
 	}
-
-	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
-		todo!()
-	}
-
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(HandshakeState, 0)
-	}
-
-	fn next_state(&self) -> Option<State> {
-		Some(self.next_state)
-	}
 }
 
 #[derive(Debug)]
 pub struct StatusRequest;
 
 impl Packet for StatusRequest {
-	fn deserialize(_: &mut impl Read) -> Result<Box<dyn Packet>> {
-		Ok(Box::new(Self))
-	}
-
 	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(StatusState, 0)
+impl PacketNonObject for StatusRequest {
+	const PACKET_STATE: State = StatusState;
+	const PACKET_BOUND: Bound = Server;
+	const PACKET_ID: u32 = 0;
+
+	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
+		Ok(PacketEnum::from(Self))
 	}
 }
 
@@ -97,16 +149,18 @@ pub struct StatusResponse {
 }
 
 impl Packet for StatusResponse {
-	fn deserialize(_reader: &mut impl Read) -> Result<Box<dyn Packet>> {
-		todo!()
-	}
-
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.string(&to_string(self).unwrap())
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(StatusState, 0)
+impl PacketNonObject for StatusResponse {
+	const PACKET_STATE: State = StatusState;
+	const PACKET_BOUND: Bound = Client;
+	const PACKET_ID: u32 = 0;
+
+	fn deserialize(_reader: &mut impl Read) -> Result<PacketEnum> {
+		todo!()
 	}
 }
 
@@ -158,90 +212,100 @@ impl Serialize for StatusResponse {
 }
 
 #[derive(Debug)]
-struct StatusPing(i64);
+pub struct StatusPing(pub i64);
 
 impl Packet for StatusPing {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
-		Ok(Box::new(Self(reader.long()?)))
-	}
-
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.long(self.0)
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(StatusState, 1)
+impl PacketNonObject for StatusPing {
+	const PACKET_STATE: State = StatusState;
+	const PACKET_BOUND: Bound = Server;
+	const PACKET_ID: u32 = 1;
+
+	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
+		Ok(PacketEnum::from(Self(reader.long()?)))
 	}
 }
 
 #[derive(Debug)]
-struct StatusPong(i64);
+pub struct StatusPong(pub i64);
 
 impl Packet for StatusPong {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
-		Ok(Box::new(Self(reader.long()?)))
-	}
-
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.long(self.0)
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(StatusState, 1)
+impl PacketNonObject for StatusPong {
+	const PACKET_STATE: State = StatusState;
+	const PACKET_BOUND: Bound = Client;
+	const PACKET_ID: u32 = 1;
+
+	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
+		Ok(PacketEnum::from(Self(reader.long()?)))
 	}
 }
 
 #[derive(Debug)]
-struct LoginStart(String);
+pub struct LoginStart(pub String);
 
 impl Packet for LoginStart {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
-		Ok(Box::new(Self(reader.string()?)))
-	}
-
 	fn serialize(&self, _: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(LoginState, 0)
+impl PacketNonObject for LoginStart {
+	const PACKET_STATE: State = LoginState;
+	const PACKET_BOUND: Bound = Server;
+	const PACKET_ID: u32 = 0;
+
+	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
+		Ok(PacketEnum::from(Self(reader.string()?)))
 	}
 }
 
 #[derive(Debug)]
-struct LoginCompression(u32);
+pub struct LoginCompression(pub u32);
 
-impl Packet for LoginCompression {
-	fn deserialize(_: &mut impl Read) -> Result<Box<dyn Packet>> {
+impl PacketNonObject for LoginCompression {
+	const PACKET_STATE: State = LoginState;
+	const PACKET_BOUND: Bound = Client;
+	const PACKET_ID: u32 = 3;
+
+	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
 		todo!()
 	}
+}
 
+impl Packet for LoginCompression {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.variable_integer(self.0 as i32)
 	}
-
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(LoginState, 3)
-	}
 }
 
 #[derive(Debug)]
-struct LoginSuccess {
-	uuid: u128,
-	username: String
+pub struct LoginSuccess {
+	pub uuid: u128,
+	pub username: String
 }
 
 impl Packet for LoginSuccess {
-	fn deserialize(_: &mut impl Read) -> Result<Box<dyn Packet>> {
-		todo!()
-	}
-
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.uuid(self.uuid)?;
 		writer.string(&self.username)
 	}
+}
 
-	fn packet_info(&self) -> &'static (State, u32) {
-		&(LoginState, 3)
+impl PacketNonObject for LoginSuccess {
+	const PACKET_STATE: State = LoginState;
+	const PACKET_BOUND: Bound = Client;
+	const PACKET_ID: u32 = 2;
+
+	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
+		todo!()
 	}
 }

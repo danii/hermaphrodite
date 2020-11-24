@@ -1,11 +1,12 @@
-use self::{packet::{Packet, deserialize}, types::{Read, Write}};
+pub mod packet;
+pub mod server;
+pub mod types;
+
+use self::{packet::{Packet, PacketEnum}, types::{Read, Write}};
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite, copy},
 	net::TcpStream, result::Result as STDResult
 };
-
-pub mod packet;
-pub mod types;
 
 pub struct Socket {
 	socket: TcpStream,
@@ -29,21 +30,23 @@ impl Socket {
 		}
 	}
 
-	pub fn send(&mut self, packets: Vec<Box<dyn Packet>>) -> Result<()> {
+	pub fn send(&mut self, packets: Vec<PacketEnum>) -> Result<()> {
 		packets.iter().map::<Result<()>, _>(|packet| {
+			println!("{:?}", packet);
 			let mut header = Vec::new();
 			let mut bytes = Vec::new();
-			bytes.variable_integer(packet.packet_info().1 as i32)?;
+			bytes.variable_integer(packet.packet_info().2 as i32)?;
 			packet.serialize(&mut bytes)?;
 			header.variable_integer(bytes.len() as i32)?;
 			header.extend(bytes);
+			println!("{:?}", header);
 			self.socket.write(&header)?;
 			Ok(())
 		}).collect::<Result<()>>()
 	}
 
 	pub fn recv(&mut self)
-			-> STDResult<Vec<Box<dyn Packet>>, (Error, Vec<Box<dyn Packet>>)> {
+			-> STDResult<Vec<PacketEnum>, (Error, Vec<PacketEnum>)> {
 		match copy(&mut self.socket, &mut self.read_buffer) {
 			Ok(_) => return Ok(vec![]), // Socket closed...
 			Err(error) => match error.kind() {
@@ -54,14 +57,14 @@ impl Socket {
 
 		let mut packets = Vec::new();
 		loop {
-			let packet: Result<Box<dyn Packet>> = try {
+			let packet: Result<PacketEnum> = try {
 				let size = Read::variable_integer(&mut self.read_buffer)? as usize;
 				if self.read_buffer.unread() > size {Err(Error::new(
 					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
 				let packet_id = Read::variable_integer(&mut self.read_buffer)? as u32;
-				match deserialize(&mut self.read_buffer, self.state, packet_id, 
-						self.bound.receiving_bound()).transpose()? {
+				match PacketEnum::deserialize(&mut self.read_buffer, self.state,
+						self.bound.receiving_bound(), packet_id).transpose()? {
 					Some(packet) => packet,
 					None => Err(Error::new(
 						ErrorKind::InvalidData, "Bad packet ID and state combo."))?
@@ -86,14 +89,14 @@ impl Socket {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum State {
 	Handshake,
 	Status,
 	Login
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Bound {
 	Server,
 	Client
