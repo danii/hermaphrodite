@@ -1,7 +1,7 @@
 use self::{packet::{Packet, deserialize}, types::{Read, Write}};
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite, copy},
-	net::TcpStream, result::Result as STDResult, slice::from_ref as slice
+	net::TcpStream, result::Result as STDResult
 };
 
 pub mod packet;
@@ -55,9 +55,11 @@ impl Socket {
 		let mut packets = Vec::new();
 		loop {
 			let packet: Result<Box<dyn Packet>> = try {
-				let size = Read::variable_integer(&mut self.read_buffer)?;
-				let packet_id = Read::variable_integer(&mut self.read_buffer)? as u32;
+				let size = Read::variable_integer(&mut self.read_buffer)? as usize;
+				if self.read_buffer.unread() > size {Err(Error::new(
+					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
+				let packet_id = Read::variable_integer(&mut self.read_buffer)? as u32;
 				match deserialize(&mut self.read_buffer, self.state, packet_id, 
 						self.bound.receiving_bound()).transpose()? {
 					Some(packet) => packet,
@@ -92,6 +94,7 @@ pub enum State {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Bound {
 	Server,
 	Client
@@ -102,6 +105,7 @@ impl Bound {
 		*self
 	}
 
+	#[allow(dead_code)]
 	fn sending_bound(&self) -> Self {
 		match self {
 			Self::Client => Self::Server,
@@ -116,6 +120,10 @@ struct ReadBuffer(Box<[u8]>, usize);
 impl ReadBuffer {
 	fn new() -> Self {
 		Self(Box::new([]), 0)
+	}
+
+	fn unread(&self) -> usize {
+		self.0.len() - self.1
 	}
 
 	fn undo(&mut self) {

@@ -1,5 +1,5 @@
 use self::super::{
-	Bound::{self, Client, Server},
+	Bound::{self, Server},
 	State::{
 		self,
 		Handshake as HandshakeState, Status as StatusState, Login as LoginState
@@ -53,7 +53,7 @@ impl Packet for Handshake {
 		}))
 	}
 
-	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
 
@@ -74,7 +74,7 @@ impl Packet for StatusRequest {
 		Ok(Box::new(Self))
 	}
 
-	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
 
@@ -94,7 +94,7 @@ pub struct StatusResponse {
 }
 
 impl Packet for StatusResponse {
-	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
+	fn deserialize(_reader: &mut impl Read) -> Result<Box<dyn Packet>> {
 		todo!()
 	}
 
