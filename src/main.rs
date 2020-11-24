@@ -1,3 +1,5 @@
+#![feature(decl_macro, try_blocks)]
+
 use std::{cmp::Ordering, thread::sleep, time::{Duration, Instant}};
 use bit_range::BitRange;
 
@@ -55,22 +57,21 @@ use std::io::{Read, Write};
 fn run_java_something_or_other(server: Arc<MinecraftServer>) {
 	let server = std::net::TcpListener::bind("127.0.0.1:25565").unwrap();
 
-	let mut socket = server.accept().unwrap().0;
+	let socket = server.accept().unwrap().0;
 
-	std::thread::sleep(std::time::Duration::from_millis(1000));
+	let mut socket = crate::java::Socket::new(socket);
+	std::thread::sleep(std::time::Duration::from_millis(100));
+	println!("{:?}", socket.recv());
+	println!("{:?}", socket.recv());
 
-	let mut b = [0; 1024];
-	let count = socket.read(&mut b).unwrap();
-	println!("{:?}", &b[..count]);
-
-	socket.write(&[
-		&[
-			0b01111010, // Length
-			0b00000000, // Packet ID
-			0b01111000, // String Length
-		],
-		"{\"version\":{\"name\":\"1.16.4\",\"protocol\":754},\"players\":{\"max\":100,\"online\":5,\"sample\":[]},\"description\":{\"text\":\"epicc\"}}".as_bytes()
-	].concat()).unwrap();
+	socket.send(vec![Box::new(crate::java::packet::StatusResponse {
+		protocol_name: "1.16.4".to_owned(),
+		protocol_version: 754,
+		players_online: 0,
+		players_max: 10,
+		players_sample: vec![],
+		display_motd: "Hello!".to_owned()
+	})]);
 }
 
 struct Server {
