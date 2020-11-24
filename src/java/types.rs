@@ -7,6 +7,8 @@ pub trait Read {
 	fn variable_integer(&mut self) -> Result<i32>;
 	fn variable_long(&mut self) -> Result<i64>;
 
+	fn long(&mut self) -> Result<i64>;
+
 	fn unsigned_short(&mut self) -> Result<u16>;
 
 	fn string(&mut self) -> Result<String>;
@@ -52,6 +54,8 @@ impl<T> Read for T
 	read_variable_type!(i32, u32, variable_integer);
 	read_variable_type!(i64, u64, variable_long);
 
+	read_primitive_type!(i64, long);
+
 	read_primitive_type!(u16, unsigned_short);
 
 	fn string(&mut self) -> Result<String> {
@@ -71,7 +75,10 @@ pub trait Write {
 	fn variable_integer(&mut self, value: i32) -> Result<()>;
 	fn variable_long(&mut self, value: i64) -> Result<()>;
 
+	fn long(&mut self, value: i64) -> Result<()>;
+
 	fn unsigned_short(&mut self, value: u16) -> Result<()>;
+	fn uuid(&mut self, value: u128) -> Result<()>;
 
 	fn string(&mut self, value: &str) -> Result<()>;
 }
@@ -94,12 +101,22 @@ macro write_variable_type($target:ty, $unsigned:ty, $name:ident) {
 	}
 }
 
+macro write_primitive_type($target:ty, $name:ident) {
+	fn $name(&mut self, value: $target) -> Result<()> {
+		self.write(&<$target>::to_be_bytes(value))?;
+		Ok(())
+	}
+}
+
 impl<T> Write for T
 		where T: IOWrite {
 	write_variable_type!(i32, u32, variable_integer);
 	write_variable_type!(i64, u64, variable_long);
 
-	fn unsigned_short(&mut self, _: u16) -> Result<()> {todo!()}
+	write_primitive_type!(i64, long);
+
+	write_primitive_type!(u16, unsigned_short);
+	write_primitive_type!(u128, uuid);
 
 	fn string(&mut self, value: &str) -> Result<()> {
 		self.variable_integer(value.as_bytes().len() as i32)?;

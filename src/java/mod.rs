@@ -94,7 +94,6 @@ pub enum State {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub enum Bound {
 	Server,
 	Client

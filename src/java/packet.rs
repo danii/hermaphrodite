@@ -1,5 +1,5 @@
 use self::super::{
-	Bound::{self, Server},
+	Bound::{self, Server, Client},
 	State::{
 		self,
 		Handshake as HandshakeState, Status as StatusState, Login as LoginState
@@ -17,6 +17,9 @@ pub fn deserialize(reader: &mut impl Read, state: State, packet: u32,
 	Some(match (state, packet, bound) {
 		(HandshakeState, 0, Server) => Handshake::deserialize(reader),
 		(StatusState, 0, Server) => StatusRequest::deserialize(reader),
+		(StatusState, 1, Server) => StatusPing::deserialize(reader),
+		(StatusState, 0, Client) => StatusResponse::deserialize(reader),
+		(StatusState, 1, Client) => StatusPong::deserialize(reader),
 		_ => return None
 	})
 }
@@ -151,5 +154,94 @@ impl Serialize for StatusResponse {
 		map.serialize_entry("players", &Players(&self))?;
 		map.serialize_entry("description", &MessageOfTheDay(&self))?;
 		map.end()
+	}
+}
+
+#[derive(Debug)]
+struct StatusPing(i64);
+
+impl Packet for StatusPing {
+	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
+		Ok(Box::new(Self(reader.long()?)))
+	}
+
+	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+		writer.long(self.0)
+	}
+
+	fn packet_info(&self) -> &'static (State, u32) {
+		&(StatusState, 1)
+	}
+}
+
+#[derive(Debug)]
+struct StatusPong(i64);
+
+impl Packet for StatusPong {
+	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
+		Ok(Box::new(Self(reader.long()?)))
+	}
+
+	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+		writer.long(self.0)
+	}
+
+	fn packet_info(&self) -> &'static (State, u32) {
+		&(StatusState, 1)
+	}
+}
+
+#[derive(Debug)]
+struct LoginStart(String);
+
+impl Packet for LoginStart {
+	fn deserialize(reader: &mut impl Read) -> Result<Box<dyn Packet>> {
+		Ok(Box::new(Self(reader.string()?)))
+	}
+
+	fn serialize(&self, _: &mut dyn Write) -> Result<()> {
+		todo!()
+	}
+
+	fn packet_info(&self) -> &'static (State, u32) {
+		&(LoginState, 0)
+	}
+}
+
+#[derive(Debug)]
+struct LoginCompression(u32);
+
+impl Packet for LoginCompression {
+	fn deserialize(_: &mut impl Read) -> Result<Box<dyn Packet>> {
+		todo!()
+	}
+
+	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+		writer.variable_integer(self.0 as i32)
+	}
+
+	fn packet_info(&self) -> &'static (State, u32) {
+		&(LoginState, 3)
+	}
+}
+
+#[derive(Debug)]
+struct LoginSuccess {
+	uuid: u128,
+	username: String
+}
+
+impl Packet for LoginSuccess {
+	fn deserialize(_: &mut impl Read) -> Result<Box<dyn Packet>> {
+		todo!()
+	}
+
+	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+		writer.uuid(self.uuid)?;
+		writer.string(&self.username)
+	}
+
+	fn packet_info(&self) -> &'static (State, u32) {
+		&(LoginState, 3)
 	}
 }
