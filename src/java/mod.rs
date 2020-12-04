@@ -2,7 +2,7 @@ pub mod packet;
 pub mod server;
 pub mod types;
 
-use self::{packet::{Packet, PacketEnum}, types::{Read, Write}};
+use self::{packet::{Packet, PacketTraitDyn}, types::{Read, Write}};
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite, copy},
 	net::TcpStream, result::Result as STDResult
@@ -30,23 +30,25 @@ impl Socket {
 		}
 	}
 
-	pub fn send(&mut self, packets: Vec<PacketEnum>) -> Result<()> {
+	pub fn send(&mut self, packets: Vec<Packet>) -> Result<()> {
 		packets.iter().map::<Result<()>, _>(|packet| {
 			println!("{:?}", packet);
 			let mut header = Vec::new();
 			let mut bytes = Vec::new();
+
 			bytes.variable_integer(packet.packet_info().2 as i32)?;
 			packet.serialize(&mut bytes)?;
+
 			header.variable_integer(bytes.len() as i32)?;
 			header.extend(bytes);
-			println!("{:?}", header);
 			self.socket.write(&header)?;
+
 			Ok(())
 		}).collect::<Result<()>>()
 	}
 
 	pub fn recv(&mut self)
-			-> STDResult<Vec<PacketEnum>, (Error, Vec<PacketEnum>)> {
+			-> STDResult<Vec<Packet>, (Error, Vec<Packet>)> {
 		match copy(&mut self.socket, &mut self.read_buffer) {
 			Ok(_) => return Ok(vec![]), // Socket closed...
 			Err(error) => match error.kind() {
@@ -57,13 +59,13 @@ impl Socket {
 
 		let mut packets = Vec::new();
 		loop {
-			let packet: Result<PacketEnum> = try {
+			let packet: Result<Packet> = try {
 				let size = Read::variable_integer(&mut self.read_buffer)? as usize;
 				if self.read_buffer.unread() > size {Err(Error::new(
 					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
 				let packet_id = Read::variable_integer(&mut self.read_buffer)? as u32;
-				match PacketEnum::deserialize(&mut self.read_buffer, self.state,
+				match Packet::deserialize(&mut self.read_buffer, self.state,
 						self.bound.receiving_bound(), packet_id).transpose()? {
 					Some(packet) => packet,
 					None => Err(Error::new(
@@ -93,7 +95,8 @@ impl Socket {
 pub enum State {
 	Handshake,
 	Status,
-	Login
+	Login,
+	Play
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

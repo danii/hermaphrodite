@@ -1,3 +1,5 @@
+//use hematite_nbt::to_writer;
+use serde::ser::Serialize;
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite},
 	mem::{size_of, transmute}, slice::from_mut as slice_mut
@@ -75,11 +77,16 @@ pub trait Write {
 	fn variable_integer(&mut self, value: i32) -> Result<()>;
 	fn variable_long(&mut self, value: i64) -> Result<()>;
 
+	fn byte(&mut self, value: i8) -> Result<()>;
 	fn long(&mut self, value: i64) -> Result<()>;
 
 	fn unsigned_short(&mut self, value: u16) -> Result<()>;
 	fn uuid(&mut self, value: u128) -> Result<()>;
 
+	fn float(&mut self, value: f32) -> Result<()>;
+	fn double(&mut self, value: f64) -> Result<()>;
+
+	//fn nbt(&mut self, value: &dyn Serialize) -> Result<()>;
 	fn string(&mut self, value: &str) -> Result<()>;
 }
 
@@ -113,10 +120,14 @@ impl<T> Write for T
 	write_variable_type!(i32, u32, variable_integer);
 	write_variable_type!(i64, u64, variable_long);
 
+	write_primitive_type!(i8, byte);
 	write_primitive_type!(i64, long);
 
 	write_primitive_type!(u16, unsigned_short);
 	write_primitive_type!(u128, uuid);
+
+	write_primitive_type!(f32, float);
+	write_primitive_type!(f64, double);
 
 	fn string(&mut self, value: &str) -> Result<()> {
 		self.variable_integer(value.as_bytes().len() as i32)?;

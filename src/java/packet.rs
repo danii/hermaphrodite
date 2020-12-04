@@ -2,7 +2,8 @@ use self::super::{
 	Bound::{self, Server, Client},
 	State::{
 		self,
-		Handshake as HandshakeState, Status as StatusState, Login as LoginState
+		Handshake as HandshakeState, Status as StatusState, Login as LoginState,
+		Play as PlayState
 	},
 	types::{Read, Write}
 };
@@ -10,11 +11,13 @@ use enum_dispatch::enum_dispatch;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::to_string;
 use std::{
-	fmt::Debug, io::{Error, ErrorKind, Result}, result::Result as STDResult
+	fmt::{Debug, Formatter, Result as FMTResult},
+	io::{Error, ErrorKind, Result},
+	result::Result as STDResult
 };
 
 #[enum_dispatch]
-pub trait Packet: Debug {
+pub trait PacketTraitDyn: Debug {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()>;
 
 	fn next_state(&self) -> Option<State> {
@@ -22,17 +25,16 @@ pub trait Packet: Debug {
 	}
 }
 
-pub trait PacketNonObject: Packet + Sized {
+pub trait PacketTrait: PacketTraitDyn + Sized {
 	const PACKET_STATE: State;
 	const PACKET_BOUND: Bound;
 	const PACKET_ID: u32;
 
-	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum>;
+	fn deserialize(reader: &mut impl Read) -> Result<Packet>;
 }
 
-#[enum_dispatch(Packet)]
-#[derive(Debug)]
-pub enum PacketEnum {
+#[enum_dispatch(PacketTraitDyn)]
+pub enum Packet {
 	Handshake,
 	StatusRequest,
 	StatusResponse,
@@ -40,7 +42,8 @@ pub enum PacketEnum {
 	StatusPong,
 	LoginStart,
 	LoginCompression,
-	LoginSuccess
+	LoginSuccess,
+	PlayPlayerPositionRotationServer
 }
 
 macro deserialize_match($match_against:expr, $reader:ident, $($typ:ty),*) {
@@ -62,13 +65,13 @@ macro packet_info_match($selff:ident, $($typ:ident:$typ2:path),*) {
 	}
 }
 
-impl PacketEnum {
+impl Packet {
 	pub fn deserialize(reader: &mut impl Read, state: State, bound: Bound,
 			packet: u32) -> Option<Result<Self>> {
 		Some(deserialize_match!(
 			(state, packet, bound), reader,
 			Handshake, StatusRequest, StatusResponse, StatusPing, StatusPong,
-			LoginStart, LoginCompression, LoginSuccess
+			LoginStart, LoginCompression, LoginSuccess, PlayPlayerPositionRotationServer
 		))
 	}
 
@@ -78,8 +81,25 @@ impl PacketEnum {
 			Handshake:Self::Handshake, StatusRequest:Self::StatusRequest,
 			StatusResponse:Self::StatusResponse, StatusPing:Self::StatusPing,
 			StatusPong:Self::StatusPong, LoginStart:Self::LoginStart,
-			LoginCompression:Self::LoginCompression, LoginSuccess:Self::LoginSuccess
+			LoginCompression:Self::LoginCompression, LoginSuccess:Self::LoginSuccess,
+			PlayPlayerPositionRotationServer:Self::PlayPlayerPositionRotationServer
 		)
+	}
+}
+
+impl Debug for Packet {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FMTResult {
+		match self {
+			Self::Handshake(packet) => write!(f, "{:?}", packet),
+			Self::StatusRequest(packet) => write!(f, "{:?}", packet),
+			Self::StatusResponse(packet) => write!(f, "{:?}", packet),
+			Self::StatusPing(packet) => write!(f, "{:?}", packet),
+			Self::StatusPong(packet) => write!(f, "{:?}", packet),
+			Self::LoginStart(packet) => write!(f, "{:?}", packet),
+			Self::LoginCompression(packet) => write!(f, "{:?}", packet),
+			Self::LoginSuccess(packet) => write!(f, "{:?}", packet),
+			Self::PlayPlayerPositionRotationServer(packet) => write!(f, "{:?}", packet)
+		}
 	}
 }
 
@@ -90,7 +110,7 @@ pub struct Handshake {
 	pub next_state: State
 }
 
-impl Packet for Handshake {
+impl PacketTraitDyn for Handshake {
 	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
@@ -100,13 +120,13 @@ impl Packet for Handshake {
 	}
 }
 
-impl PacketNonObject for Handshake {
+impl PacketTrait for Handshake {
 	const PACKET_STATE: State = HandshakeState;
 	const PACKET_BOUND: Bound = Server;
 	const PACKET_ID: u32 = 0;
 
-	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
-		Ok(PacketEnum::from(Self {
+	fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+		Ok(Packet::from(Self {
 			protocol_version: reader.variable_integer()? as u32,
 			address: (reader.string()?, reader.unsigned_short()?),
 			next_state: match reader.variable_integer()? {
@@ -122,19 +142,19 @@ impl PacketNonObject for Handshake {
 #[derive(Debug)]
 pub struct StatusRequest;
 
-impl Packet for StatusRequest {
+impl PacketTraitDyn for StatusRequest {
 	fn serialize(&self, _writer: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
 }
 
-impl PacketNonObject for StatusRequest {
+impl PacketTrait for StatusRequest {
 	const PACKET_STATE: State = StatusState;
 	const PACKET_BOUND: Bound = Server;
 	const PACKET_ID: u32 = 0;
 
-	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
-		Ok(PacketEnum::from(Self))
+	fn deserialize(_: &mut impl Read) -> Result<Packet> {
+		Ok(Packet::from(Self))
 	}
 }
 
@@ -148,18 +168,18 @@ pub struct StatusResponse {
 	pub display_motd: String
 }
 
-impl Packet for StatusResponse {
+impl PacketTraitDyn for StatusResponse {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.string(&to_string(self).unwrap())
 	}
 }
 
-impl PacketNonObject for StatusResponse {
+impl PacketTrait for StatusResponse {
 	const PACKET_STATE: State = StatusState;
 	const PACKET_BOUND: Bound = Client;
 	const PACKET_ID: u32 = 0;
 
-	fn deserialize(_reader: &mut impl Read) -> Result<PacketEnum> {
+	fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -214,74 +234,74 @@ impl Serialize for StatusResponse {
 #[derive(Debug)]
 pub struct StatusPing(pub i64);
 
-impl Packet for StatusPing {
+impl PacketTraitDyn for StatusPing {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.long(self.0)
 	}
 }
 
-impl PacketNonObject for StatusPing {
+impl PacketTrait for StatusPing {
 	const PACKET_STATE: State = StatusState;
 	const PACKET_BOUND: Bound = Server;
 	const PACKET_ID: u32 = 1;
 
-	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
-		Ok(PacketEnum::from(Self(reader.long()?)))
+	fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+		Ok(Packet::from(Self(reader.long()?)))
 	}
 }
 
 #[derive(Debug)]
 pub struct StatusPong(pub i64);
 
-impl Packet for StatusPong {
+impl PacketTraitDyn for StatusPong {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.long(self.0)
 	}
 }
 
-impl PacketNonObject for StatusPong {
+impl PacketTrait for StatusPong {
 	const PACKET_STATE: State = StatusState;
 	const PACKET_BOUND: Bound = Client;
 	const PACKET_ID: u32 = 1;
 
-	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
-		Ok(PacketEnum::from(Self(reader.long()?)))
+	fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+		Ok(Packet::from(Self(reader.long()?)))
 	}
 }
 
 #[derive(Debug)]
 pub struct LoginStart(pub String);
 
-impl Packet for LoginStart {
+impl PacketTraitDyn for LoginStart {
 	fn serialize(&self, _: &mut dyn Write) -> Result<()> {
 		todo!()
 	}
 }
 
-impl PacketNonObject for LoginStart {
+impl PacketTrait for LoginStart {
 	const PACKET_STATE: State = LoginState;
 	const PACKET_BOUND: Bound = Server;
 	const PACKET_ID: u32 = 0;
 
-	fn deserialize(reader: &mut impl Read) -> Result<PacketEnum> {
-		Ok(PacketEnum::from(Self(reader.string()?)))
+	fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+		Ok(Packet::from(Self(reader.string()?)))
 	}
 }
 
 #[derive(Debug)]
 pub struct LoginCompression(pub u32);
 
-impl PacketNonObject for LoginCompression {
+impl PacketTrait for LoginCompression {
 	const PACKET_STATE: State = LoginState;
 	const PACKET_BOUND: Bound = Client;
 	const PACKET_ID: u32 = 3;
 
-	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
+	fn deserialize(_: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
 
-impl Packet for LoginCompression {
+impl PacketTraitDyn for LoginCompression {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.variable_integer(self.0 as i32)
 	}
@@ -293,19 +313,56 @@ pub struct LoginSuccess {
 	pub username: String
 }
 
-impl Packet for LoginSuccess {
+impl PacketTraitDyn for LoginSuccess {
 	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
 		writer.uuid(self.uuid)?;
 		writer.string(&self.username)
 	}
+
+	fn next_state(&self) -> Option<State> {
+		Some(PlayState)
+	}
 }
 
-impl PacketNonObject for LoginSuccess {
+impl PacketTrait for LoginSuccess {
 	const PACKET_STATE: State = LoginState;
 	const PACKET_BOUND: Bound = Client;
 	const PACKET_ID: u32 = 2;
 
-	fn deserialize(_: &mut impl Read) -> Result<PacketEnum> {
+	fn deserialize(_: &mut impl Read) -> Result<Packet> {
+		todo!()
+	}
+}
+
+#[derive(Debug)]
+pub struct PlayPlayerPositionRotationServer {
+	pub x: f64,
+	pub y: f64,
+	pub z: f64,
+	pub yaw: f32,
+	pub pitch: f32,
+	pub flags: i8,
+	pub teleport_id: i32
+}
+
+impl PacketTraitDyn for PlayPlayerPositionRotationServer {
+	fn serialize(&self, writer: &mut dyn Write) -> Result<()> {
+		writer.double(self.x)?;
+		writer.double(self.y)?;
+		writer.double(self.z)?;
+		writer.float(self.yaw)?;
+		writer.float(self.pitch)?;
+		writer.byte(self.flags)?;
+		writer.variable_integer(self.teleport_id)
+	}
+}
+
+impl PacketTrait for PlayPlayerPositionRotationServer {
+	const PACKET_STATE: State = PlayState;
+	const PACKET_BOUND: Bound = Client;
+	const PACKET_ID: u32 = 52;
+
+	fn deserialize(_: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }

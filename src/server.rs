@@ -1,6 +1,3 @@
-use std::{cmp::Ordering, thread::sleep, time::{Duration, Instant}};
-use bit_range::BitRange;
-
 /*struct Stuff {
 	last: Instant,
 	duration: Duration
@@ -41,19 +38,44 @@ fn tick(this: &mut Stuff) {
 	else {this.last = this.last + this.duration}
 }*/
 
-use std::sync::Arc;
-use std::io::{Read, Write};
+use self::super::{interface::{Event, MinecraftServer}, util::{GenericTraitObject, generic_trait, generic_trait_downcast}};
+use bit_range::BitRange;
+use std::{any::{Any, TypeId}, collections::{HashMap, HashSet}, sync::Mutex};
 
-use self::super::interface::MinecraftServer;
-
-pub struct Server {
+pub struct Server<'l> {
+	event_listeners: Mutex<HashMap<TypeId, Vec<GenericTraitObject<'l>>>>,
+	entities: Mutex<HashSet<Player>>
 	//orphanned_connections: Vec<()>,
 	//loaded_chunks: HashMap<(u64, u64), Chunk>
 }
 
-impl Server {
+pub struct Player {
+	username: Box<str>,
+	x: (u64, u16),
+	y: (u64, u16),
+	z: (u64, u16)
+}
+
+impl std::hash::Hash for Player {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		state.write_u8(0)
+	}
+}
+
+impl std::cmp::PartialEq for Player {
+	fn eq(&self, other: &Self) -> bool {
+		true
+	}
+}
+
+impl std::cmp::Eq for Player {}
+
+impl<'l> Server<'l> {
 	pub fn new() -> Self {
-		Self {}
+		Self {
+			event_listeners: Mutex::new(HashMap::new()),
+			entities: Mutex::new(HashSet::new())
+		}
 	}
 
 	fn tick(&self) {
@@ -61,10 +83,44 @@ impl Server {
 	}
 }
 
-impl MinecraftServer for Server {
+impl<'l> MinecraftServer<'l> for Server<'l> {
 	fn message_of_the_day(&self) -> String {
 		"Hello, world!".to_owned()
 	}
+
+	fn event_listener_register<E>(&self, listener: &'l dyn Fn(&E, &Self))
+			where E: Event + 'static {
+		let mut event_listeners = self.event_listeners.lock().unwrap();
+
+		let event_listeners = event_listeners.entry(TypeId::of::<E>())
+			.or_insert_with(Vec::new);
+
+		event_listeners.push(generic_trait!(listener));
+	}
+
+	fn event_dispatch<E>(&self, event: E)
+			where E: Event + 'static {
+		let event_listeners = self.event_listeners.lock().unwrap();
+
+		event_listeners.get(&TypeId::of::<E>())
+			.map(|listeners| listeners.iter()
+				.for_each(|listener| unsafe {
+					let func: &dyn Fn(&E, &Self) = generic_trait_downcast!(listener);
+					func(&event, self);
+				}));
+
+		event.handle(self);
+	 }
+	 
+	 fn new_pov(&self, name: Box<str>) {
+			let mut entities = self.entities.lock().unwrap();
+			entities.insert(Player {
+				username: name,
+				x: (0, 0),
+				y: (0, 0),
+				z: (0, 0)
+			});
+	 }
 }
 
 struct Chunk {
