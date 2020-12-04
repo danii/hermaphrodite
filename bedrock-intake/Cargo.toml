@@ -1,0 +1,5 @@
+[package]
+name = "bedrock-intake"
+version = "0.1.0"
+authors = ["Daniel Conley <danielc030417@gmail.com>"]
+edition = "2018"
