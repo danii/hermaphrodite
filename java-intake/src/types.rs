@@ -1,22 +1,9 @@
-//use hematite_nbt::to_writer;
-use serde::ser::Serialize;
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite},
 	mem::{size_of, transmute}, slice::from_mut as slice_mut
 };
 
-pub trait Read {
-	fn variable_integer(&mut self) -> Result<i32>;
-	fn variable_long(&mut self) -> Result<i64>;
-
-	fn long(&mut self) -> Result<i64>;
-
-	fn unsigned_short(&mut self) -> Result<u16>;
-
-	fn string(&mut self) -> Result<String>;
-}
-
-pub macro read_variable_type($target:ty, $unsigned:ty, $name:ident) {
+macro read_variable_type($target:ty, $unsigned:ty, $name:ident) {
 	fn $name(&mut self) -> Result<$target> {
 		let mut result = 0;
 		let mut reads = 0;
@@ -49,6 +36,42 @@ macro read_primitive_type($target:ty, $name:ident) {
 
 		Ok(<$target>::from_be_bytes(buffer))
 	}
+}
+
+macro write_variable_type($target:ty, $unsigned:ty, $name:ident) {
+	fn $name(&mut self, value: $target) -> Result<()> {
+		let mut value: $unsigned = unsafe {transmute(value)};
+
+		loop {
+			let mut byte = value as u8 & 0b01111111;
+			value = value >> 7;
+
+			if value != 0 {
+				self.write(slice_mut(&mut (byte | 0b10000000)))?;
+			} else {
+				self.write(slice_mut(&mut byte))?;
+				break Ok(())
+			}
+		}
+	}
+}
+
+macro write_primitive_type($target:ty, $name:ident) {
+	fn $name(&mut self, value: $target) -> Result<()> {
+		self.write(&<$target>::to_be_bytes(value))?;
+		Ok(())
+	}
+}
+
+pub trait Read {
+	fn variable_integer(&mut self) -> Result<i32>;
+	fn variable_long(&mut self) -> Result<i64>;
+
+	fn long(&mut self) -> Result<i64>;
+
+	fn unsigned_short(&mut self) -> Result<u16>;
+
+	fn string(&mut self) -> Result<String>;
 }
 
 impl<T> Read for T
@@ -90,31 +113,6 @@ pub trait Write {
 	fn string(&mut self, value: &str) -> Result<()>;
 }
 
-macro write_variable_type($target:ty, $unsigned:ty, $name:ident) {
-	fn $name(&mut self, value: $target) -> Result<()> {
-		let mut value: $unsigned = unsafe {transmute(value)};
-
-		loop {
-			let mut byte = value as u8 & 0b01111111;
-			value = value >> 7;
-
-			if value != 0 {
-				self.write(slice_mut(&mut (byte | 0b10000000)))?;
-			} else {
-				self.write(slice_mut(&mut byte))?;
-				break Ok(())
-			}
-		}
-	}
-}
-
-macro write_primitive_type($target:ty, $name:ident) {
-	fn $name(&mut self, value: $target) -> Result<()> {
-		self.write(&<$target>::to_be_bytes(value))?;
-		Ok(())
-	}
-}
-
 impl<T> Write for T
 		where T: IOWrite {
 	write_variable_type!(i32, u32, variable_integer);
@@ -133,5 +131,32 @@ impl<T> Write for T
 		self.variable_integer(value.as_bytes().len() as i32)?;
 		self.write(value.as_bytes())?;
 		Ok(())
+	}
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum State {
+	Handshake,
+	Status,
+	Login,
+	Play
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum Bound {
+	Server,
+	Client
+}
+
+impl Bound {
+	pub fn receiving_bound(&self) -> Self {
+		*self
+	}
+
+	pub fn sending_bound(&self) -> Self {
+		match self {
+			Self::Client => Self::Server,
+			Self::Server => Self::Client
+		}
 	}
 }

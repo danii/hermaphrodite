@@ -1,10 +1,9 @@
 [package]
-name = "hermaphrodite"
+name = "compile-in"
 version = "0.1.0"
 authors = ["Daniel Conley <danielc030417@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-bit_range = "0.1.0"
-enum_dispatch = "0.3.4"
-libloading = "0.6.5"
+hermaphrodite = {path = "../hermaphrodite"}
+java-intake = {path = "../java-intake"}

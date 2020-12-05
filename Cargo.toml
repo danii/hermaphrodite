@@ -2,5 +2,6 @@
 members = [
 	"hermaphrodite",
 	"java-intake",
-	"bedrock-intake"
+	"bedrock-intake",
+	"compile-in"
 ]
