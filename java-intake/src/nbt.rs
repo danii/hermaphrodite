@@ -3,63 +3,156 @@ use serde::ser::{
 	SerializeTupleStruct, SerializeTupleVariant, SerializeStruct,
 	SerializeStructVariant, SerializeTuple, SerializeSeq, SerializeMap
 };
+use serde_primitives::StringSerializer;
 use std::{
+	convert::TryFrom,
 	error::Error as STDError,
 	fmt::{Display, Formatter, Result as FMTResult},
-	io::{Error as IOError, Result as IOResult, Write},
+	io::{Error as IOError, ErrorKind as IOErrorKind, Result as IOResult, Write},
+	mem::swap,
+	option::NoneError,
 	result::Result as STDResult
 };
 
 type Result<T> = STDResult<T, Error>;
 
-pub struct Serializer<'n, W>
-		where W: Write {
-	writer: W,
-	action: WriteAction<'n>
+enum WriteAction {
+	None,
+	Named(Box<str>),
+	List(Option<Box<str>>, u8, u32),
+	DynamicList(Option<Box<str>>, u8, u32, Vec<u8>)
 }
 
-impl<'n, W> Serializer<'n, W>
+pub struct Serializer<W>
 		where W: Write {
+	writer: W,
+	action: WriteAction
+}
+
+impl <W> Serializer<W>
+		where W: Write {
+	#[inline]
 	pub fn new_raw(writer: W) -> Self {
 		Self {writer, action: WriteAction::None}
 	}
 
-	pub fn new_compound(writer: W, name: &'n str) -> Self {
-		Self {writer, action: WriteAction::Compound(name)}
+	#[inline]
+	pub fn new_compound(writer: W, name: impl AsRef<str>) -> Self {
+		Self {writer, action: WriteAction::Named(name.as_ref().into())}
 	}
 
+	#[inline]
 	pub fn new_compound_unnamed(writer: W) -> Self {
 		Self::new_compound(writer, "")
 	}
 
+	#[inline]
 	fn write_header(&mut self, tag_type: u8) -> Result<()> {
 		match &mut self.action {
-			WriteAction::Compound(name) => {
-				let name = *name;
+			WriteAction::Named(name) => {
+				let name = name.clone();
 				self.writer.write(&[tag_type])?;
 				self.action = WriteAction::None;
-				self.serialize_str(name)?;
+				self.serialize_str(&name)?;
 			},
-			WriteAction::List(list_type, length) => match list_type {
+			WriteAction::List(compound, list_type, length) => match list_type {
+				// If this is the first value of the list (represented by the stored
+				// type ID being TAG_End), then we must write the type ID of the types
+				// we're storing.
 				0 => {
-					self.writer.write(&[tag_type])?;
-					self.writer.write(&length.to_be_bytes())?;
-					*list_type = tag_type
+					// Write the tag_type to this action to check against in the future,
+					// as lists can only store one type, like a vector.
+					*list_type = tag_type;
+
+					// Borrow checker stuff.
+					let length = length.to_be_bytes();
+
+					// If compound is Some, that means this is a named list, and we
+					// skipped writing the type and name information last time, so we
+					// could gather more data to perform some optimizations.
+					if let Some(name) = compound.clone() {
+						// If we're about to write the named tag data, we shouldn't do it
+						// again.
+						*compound = None;
+						let mut default = false;
+
+						// That optimization is using the array tags, which includes the
+						// type ID of types we'll be writing in the array's tag type, saving
+						// us one byte. Small on it's own, big in the long run!
+						self.writer.write(match tag_type {
+							1 => &[7], // TAG_List of TAG_Byte? Use TAG_Byte_Array instead.
+							3 => &[11], // TAG_List of TAG_Int? Use TAG_Int_Array instead.
+							4 => &[12], // TAG_List of TAG_Long?? Use TAG_Long_Array instead.
+							_ => {
+								default = true;
+								&[9] // Otherwise, revert to using TAG_List.
+							}
+						})?;
+
+						// Write this named tag's name, without the write action set.
+						let mut action = WriteAction::None;
+						swap(&mut self.action, &mut action); // Swap to.
+						self.serialize_str(&name)?;
+						self.action = action; // Swap back.
+
+						if default {
+							// Write the tag type of the items in this list, if we're not
+							// using a specialized array.
+							// do this on dyn!
+							self.writer.write(&[tag_type])?;
+						}
+					} else {
+						// Otherwise, we are not writing a named list, rather a normal list,
+						// meaning we don't have to write a type, other than the types of
+						// values we'll be storing.
+						self.writer.write(&[tag_type])?;
+					}
+
+					// Write this list's length. Thankfully, the size of the length field
+					// is the same regardless if this is a type specific array.
+					self.writer.write(&length)?;
 				},
-				value if *value == tag_type => (),
-				_ => {
-					return Err(Error::Custom("list diff types".to_owned().into_boxed_str()))
-				}
+
+				// If the type ID we have stored is the same type ID as we're about to
+				// write, we don't have to do anything, and can let the value serialzie.
+				_ if *list_type == tag_type => (),
+
+				// If it isn't, then we must throw an error.
+				_ => return Err(Error::Custom("list diff types".to_owned().into_boxed_str()))
 			},
-			WriteAction::DynamicList(list_type, ..) => match list_type {
+			WriteAction::DynamicList(compound, list_type, ..) => match list_type {
 				0 => {
-					self.writer.write(&[tag_type])?;
-					*list_type = tag_type
+					// Same optimization as in WriteAction::List.
+					*list_type = tag_type;
+
+					if let Some(name) = compound.clone() {
+						*compound = None;
+						let default = &[9, tag_type];
+
+						self.writer.write(match tag_type {
+							1 => &[7], // TAG_List of TAG_Byte? Use TAG_Byte_Array instead.
+							3 => &[11], // TAG_List of TAG_Int? Use TAG_Int_Array instead.
+							4 => &[12], // TAG_List of TAG_Long?? Use TAG_Long_Array instead.
+							_ => default // Otherwise, revert to using TAG_List.
+						})?;
+
+						let mut action = WriteAction::None;
+						swap(&mut self.action, &mut action); // Swap to.
+						self.serialize_str(&name)?;
+						self.action = action; // Swap back.
+					} else {
+						self.writer.write(&[tag_type])?;
+					}
+
+					// This time, don't write the length, as we do not know it now.
+					// Instead, we will be writing into a temporary buffer, computing
+					// the length as we go until the list is ended, then we flush the
+					// buffer into the writer, with the computed length first of course.
 				},
-				value if *value == tag_type => (),
-				_ => {
-					return Err(Error::Custom("list diff types".to_owned().into_boxed_str()))
-				}
+
+				// Same things as WriteAction::List.
+				_ if *list_type == tag_type => (),
+				_ => return Err(Error::Custom("list diff types2".to_owned().into_boxed_str()))
 			},
 			_ => {}
 		}
@@ -67,25 +160,61 @@ impl<'n, W> Serializer<'n, W>
 		Ok(())
 	}
 
-	fn compound_set(&mut self, name: &'n str) -> Result<()> {
-		self.action = WriteAction::Compound(name);
+	#[inline]
+	fn named_start(&mut self, name: impl AsRef<str>) -> Result<()> {
+		self.action = WriteAction::Named(name.as_ref().into());
 		Ok(())
 	}
 
-	fn compound_end(&mut self) -> Result<()> {
+	#[inline]
+	fn named_end(&mut self) -> Result<()> {
 		self.writer.write(&[0])?;
 		Ok(())
 	}
 
-	fn list_set_optional_length(&mut self, length: Option<usize>) -> Result<()> {
-		match length {
-			Some(length) => self.list_set_length(length)?,
-			None => self.action = WriteAction::DynamicList(0, 0, Vec::new())
+	/// This handles calling write_header for us.
+	#[inline]
+	fn list_start(&mut self, length: impl Into<Option<usize>>)
+			-> Result<()> {
+		// I expect this to be optimized away when length is passed a usize.
+		match length.into() {
+			Some(length) => {
+				// If we know the length of this list, first make sure it's in range
+				// of a u32, then set the write action to a list.
+				if length > u32::MAX as usize {
+					return Err(Error::Custom("Oops".to_owned().into_boxed_str()))
+				}
+
+				// Be sure to use the optimized named tag code for lists.
+				let compound = match &self.action {
+					WriteAction::Named(name) => Some(name.clone()),
+					_ => {
+						self.write_header(9)?;
+						None
+					}
+				};
+
+				self.action = WriteAction::List(compound, 0, length as u32)
+			},
+			None => {
+				// Otherwise, we have to use a buffer... Once again, be sure to use the
+				// optimized tag code for lists.
+				let compound = match &self.action {
+					WriteAction::Named(name) => Some(name.clone()),
+					_ => {
+						self.write_header(9)?;
+						None
+					}
+				};
+
+				self.action = WriteAction::DynamicList(compound, 0, 0, Vec::new())
+			}
 		}
 
 		Ok(())
 	}
 
+	/*
 	fn list_set_length(&mut self, length: usize) -> Result<()> {
 		if length > u32::MAX as usize {
 			return Err(Error::Custom("Oops".to_owned().into_boxed_str()))
@@ -93,7 +222,7 @@ impl<'n, W> Serializer<'n, W>
 
 		self.action = WriteAction::List(0, length as u32);
 		Ok(())
-	}
+	}*/
 
 	fn list_increment_length(&mut self) -> Result<()> {
 		match &mut self.action {
@@ -106,7 +235,7 @@ impl<'n, W> Serializer<'n, W>
 	}
 }
 
-impl<'n, W> Write for Serializer<'n, W>
+impl <W> Write for Serializer <W>
 		where W: Write {
 	fn write(&mut self, buf: &[u8]) -> IOResult<usize> {
 		if let WriteAction::DynamicList(.., buffer) = &mut self.action {
@@ -125,14 +254,7 @@ impl<'n, W> Write for Serializer<'n, W>
 	}
 }
 
-enum WriteAction<'n> {
-	None,
-	Compound(&'n str),
-	List(u8, u32),
-	DynamicList(u8, u32, Vec<u8>)
-}
-
-impl<'r, 'n, W> SerDeSerializer for &'r mut Serializer<'n, W>
+impl<'r, W> SerDeSerializer for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
@@ -253,8 +375,9 @@ impl<'r, 'n, W> SerDeSerializer for &'r mut Serializer<'n, W>
 		todo!()
 	}
 
-	fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeTupleStruct> {
-		todo!()
+	fn serialize_tuple_struct(self, name: &'static str, length: usize) -> Result<Self::SerializeTupleStruct> {
+		self.list_start(length)?;
+		Ok(self)
 	}
 
 	fn serialize_tuple_variant(self, name: &'static str, index: u32, variant: &'static str, len: usize) -> Result<Self::SerializeTupleVariant> {
@@ -275,85 +398,86 @@ impl<'r, 'n, W> SerDeSerializer for &'r mut Serializer<'n, W>
 	}
 
 	fn serialize_tuple(self, length: usize) -> Result<Self> {
-		self.write_header(9)?;
-		self.list_set_length(length)?;
+		self.list_start(length)?;
 		Ok(self)
 	}
 
 	fn serialize_seq(self, length: Option<usize>) -> Result<Self> {
-		self.write_header(9)?;
-		self.list_set_optional_length(length)?;
+		self.list_start(length)?;
 		Ok(self)
 	}
 
 	fn serialize_map(self, _: Option<usize>) -> Result<Self> {
+		self.write_header(10)?;
 		Ok(self)
 	}
 }
 
-impl<'r, 'n, W> SerializeTupleStruct for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeTupleStruct for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, value: &T) -> Result<()>
 			where T: Serialize + ?Sized {
-		todo!()
+		self.list_increment_length()?;
+		value.serialize(&mut **self)
 	}
 
 	fn end(self) -> Result<()> {
-		todo!()
+		Ok(())
 	}
 }
 
-impl<'r, 'n, W> SerializeTupleVariant for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeTupleVariant for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, value: &T) -> Result<()>
 			where T: Serialize + ?Sized {
-		todo!()
+		self.list_increment_length()?;
+		value.serialize(&mut **self)
 	}
 
 	fn end(self) -> Result<()> {
-		todo!()
+		Ok(())
 	}
 }
 
-impl<'r, 'n, W> SerializeStruct for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeStruct for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
 			where T: Serialize + ?Sized {
-		self.compound_set(key)?;
+		self.named_start(key)?;
 		value.serialize(&mut **self)
 	}
 
 	fn end(self) -> Result<()> {
-		self.compound_end()
+		self.named_end()
 	}
 }
 
-impl<'r, 'n, W> SerializeStructVariant for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeStructVariant for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
 			where T: Serialize + ?Sized {
-		self.compound_set(key)?;
+		self.named_start(key)?;
 		value.serialize(&mut **self)
 	}
 
 	fn end(self) -> Result<()> {
-		self.compound_end()
+		self.named_end()
 	}
 }
 
-impl<'r, 'n, W> SerializeTuple for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeTuple for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
@@ -369,7 +493,7 @@ impl<'r, 'n, W> SerializeTuple for &'r mut Serializer<'n, W>
 	}
 }
 
-impl<'r, 'n, W> SerializeSeq for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeSeq for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
@@ -385,25 +509,26 @@ impl<'r, 'n, W> SerializeSeq for &'r mut Serializer<'n, W>
 	}
 }
 
-impl<'r, 'n, W> SerializeMap for &'r mut Serializer<'n, W>
+impl<'r, W> SerializeMap for &'r mut Serializer <W>
 		where W: Write {
 	type Ok = ();
 	type Error = Error;
 
-	fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
-	where
-					T: Serialize {
-			todo!()
+	fn serialize_key<T>(&mut self, key: &T) -> Result<()>
+			where T: Serialize + ?Sized {
+		let mut serializer = StringSerializer::new();
+		key.serialize(&mut serializer).unwrap();
+		self.named_start(&serializer?)?;
+		Ok(())
 	}
 
-	fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
-	where
-					T: Serialize {
-			todo!()
+	fn serialize_value<T>(&mut self, value: &T) -> Result<()>
+			where T: Serialize + ?Sized {
+		value.serialize(&mut **self)
 	}
 
 	fn end(self) -> Result<()> {
-		self.compound_end()
+		self.named_end()
 	}
 }
 
@@ -431,8 +556,25 @@ impl SerError for Error {
 	}
 }
 
+impl From<Error> for IOError {
+	fn from(error: Error) -> Self {
+		match error {
+			Error::IO(error) =>
+				error,
+			Error::Custom(..) =>
+				IOError::new(IOErrorKind::InvalidData, error)
+		}
+	}
+}
+
 impl From<IOError> for Error {
 	fn from(error: IOError) -> Self {
 		Self::IO(error)
+	}
+}
+
+impl From<NoneError> for Error {
+	fn from(_: NoneError) -> Self {
+		Self::Custom("A depended on serialization failed".into())
 	}
 }

@@ -64,8 +64,11 @@ impl Socket {
 				match Packet::deserialize(&mut self.read_buffer, self.state,
 						self.bound.receiving_bound(), packet_id).transpose()? {
 					Some(packet) => packet,
-					None => Err(Error::new(
-						ErrorKind::InvalidData, "Bad packet ID and state combo."))?
+					// TODO: IF WE RECEIEVE PACKETS WE DO NOT UNDERSTAND, SIMPLY IGNORE THEM.
+					// This is so you can at least spend 10 seconds in the server in the void when connecting, because hey, that's fun.
+					// (UnexpectedEof isn't treated as an error)
+					None => Err(Error::new(ErrorKind::UnexpectedEof, ""))?/*Err(Error::new(
+						ErrorKind::InvalidData, format!("Bad packet ID {} for STATE {:?}.", packet_id, self.state)))?*/
 				}
 			};
 

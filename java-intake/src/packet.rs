@@ -1,5 +1,8 @@
-use self::super::types::{Bound, Read, State, Write};
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use self::super::{
+	nbt::Serializer as NBTSerializer,
+	types::{Bound, Read, State, Write}
+};
+use serde::{ser::{SerializeMap, SerializeSeq, Serializer}, Serialize};
 use serde_json::to_string;
 use std::{
 	io::{Error, ErrorKind, Result},
@@ -29,6 +32,7 @@ pub enum Packet {
 	LoginStart(LoginStart),
 	LoginCompression(LoginCompression),
 	LoginSuccess(LoginSuccess),
+	PlayJoinGame(PlayJoinGame),
 	PlayPlayerPositionRotationServer(PlayPlayerPositionRotationServer)
 }
 
@@ -58,6 +62,8 @@ macro constant_fetcher($name:ident(), $constant:ident, $result:ident) {
 				LoginSuccess::$constant,
 
 			// Play
+			Self::PlayJoinGame(_) =>
+				PlayJoinGame::$constant,
 			Self::PlayPlayerPositionRotationServer(_) =>
 				PlayPlayerPositionRotationServer::$constant
 		}
@@ -90,6 +96,8 @@ macro trait_impl($traitt:ident::$name:ident($($arg:ident: $arg_ty:ty),*), $resul
 				$traitt::$name(packet, $($arg),*),
 
 			// Play
+			Self::PlayJoinGame(packet) =>
+				$traitt::$name(packet, $($arg),*),
 			Self::PlayPlayerPositionRotationServer(packet) =>
 				$traitt::$name(packet, $($arg),*)
 		}
@@ -128,6 +136,8 @@ impl Packet {
 				LoginSuccess::deserialize(reader),
 
 			// Play
+			(PlayJoinGame::PACKET_STATE, PlayJoinGame::PACKET_BOUND, PlayJoinGame::PACKET_ID) =>
+				PlayJoinGame::deserialize(reader),
 			(PlayPlayerPositionRotationServer::PACKET_STATE, PlayPlayerPositionRotationServer::PACKET_BOUND, PlayPlayerPositionRotationServer::PACKET_ID) =>
 				PlayPlayerPositionRotationServer::deserialize(reader),
 
@@ -148,6 +158,7 @@ impl Debug for Packet {
 			Self::LoginStart(packet) => write!(f, "{:?}", packet),
 			Self::LoginCompression(packet) => write!(f, "{:?}", packet),
 			Self::LoginSuccess(packet) => write!(f, "{:?}", packet),
+			Self::PlayJoinGame(packet) => write!(f, "{:?}", packet),
 			Self::PlayPlayerPositionRotationServer(packet) => write!(f, "{:?}", packet)
 		}
 	}
@@ -242,9 +253,9 @@ impl PacketLiterate for StatusResponse {
 impl Serialize for StatusResponse {
 	fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
 			where S: Serializer {
-		struct Protocol<'p>(&'p StatusResponse);
+		struct Protocol<'r>(&'r StatusResponse);
 
-		impl<'p> Serialize for Protocol<'p> {
+		impl<'r> Serialize for Protocol<'r> {
 			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
 					where S: Serializer {
 				let mut map = serializer.serialize_map(Some(2))?;
@@ -254,9 +265,9 @@ impl Serialize for StatusResponse {
 			}
 		}
 
-		struct Players<'p>(&'p StatusResponse);
+		struct Players<'r>(&'r StatusResponse);
 
-		impl<'p> Serialize for Players<'p> {
+		impl<'r> Serialize for Players<'r> {
 			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
 					where S: Serializer {
 				let mut map = serializer.serialize_map(Some(3))?;
@@ -267,9 +278,9 @@ impl Serialize for StatusResponse {
 			}
 		}
 
-		struct MessageOfTheDay<'p>(&'p StatusResponse);
+		struct MessageOfTheDay<'r>(&'r StatusResponse);
 
-		impl<'p> Serialize for MessageOfTheDay<'p> {
+		impl<'r> Serialize for MessageOfTheDay<'r> {
 			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
 					where S: Serializer {
 				let mut map = serializer.serialize_map(Some(1))?;
@@ -413,6 +424,63 @@ impl Into<Packet> for LoginSuccess {
 }
 
 #[derive(Debug)]
+pub struct PlayJoinGame {
+	pub entity_id: u32,
+
+	pub gamemode_current: u8,
+	pub gamemode_previous: u8,
+	pub gamemode_hardcore: bool,
+	pub view_distance: u32,
+	pub reduced_debug: bool,
+	pub respawn_screen: bool,
+
+	pub world_list: Vec<String>,
+	pub world_name: String,
+	pub seed_hashed: u64,
+	pub world_debug: bool,
+	pub world_flat: bool,
+
+	pub dimension: Dimension,
+	pub dimension_codec: DimensionCodec
+}
+
+impl PacketLiterate for PlayJoinGame {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Client;
+	const PACKET_ID: u32 = 36;
+
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		writer.int(self.entity_id as i32)?;
+		writer.bool(self.gamemode_hardcore)?;
+		writer.unsigned_byte(self.gamemode_current)?;
+		writer.byte(self.gamemode_previous as i8)?;
+		writer.variable_integer(self.world_list.len() as i32)?;
+		self.world_list.iter().try_for_each(|world| writer.string(world))?;
+		writer.nbt(&self.dimension_codec, "")?;
+		writer.nbt(&self.dimension, "")?;
+		writer.string(&self.world_name)?;
+		writer.long(self.seed_hashed as i64)?;
+		writer.variable_integer(0)?;
+		writer.variable_integer(self.view_distance as i32)?;
+		writer.bool(self.reduced_debug)?;
+		writer.bool(self.respawn_screen)?;
+		writer.bool(self.world_debug)?;
+		writer.bool(self.world_flat)?;
+		Ok(())
+	}
+
+	fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
+		todo!()
+	}
+}
+
+impl Into<Packet> for PlayJoinGame {
+	fn into(self) -> Packet {
+		Packet::PlayJoinGame(self)
+	}
+}
+
+#[derive(Debug)]
 pub struct PlayPlayerPositionRotationServer {
 	pub x: f64,
 	pub y: f64,
@@ -446,5 +514,164 @@ impl PacketLiterate for PlayPlayerPositionRotationServer {
 impl Into<Packet> for PlayPlayerPositionRotationServer {
 	fn into(self) -> Packet {
 		Packet::PlayPlayerPositionRotationServer(self)
+	}
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Dimension {
+	#[serde(rename = "respawn_anchor_works")]
+	pub work_anchor: bool,
+	#[serde(rename = "bed_works")]
+	pub work_bed: bool,
+	#[serde(rename = "piglin_safe")]
+	pub work_piglin: bool,
+	#[serde(rename = "has_raids")]
+	pub work_raids: bool,
+	#[serde(rename = "has_skylight")]
+	pub work_skylight: bool,
+
+	#[serde(rename = "infiniburn")]
+	pub category_infiniburn: String,
+	#[serde(rename = "effects")]
+	pub category_effects: String,
+
+	#[serde(rename = "ambient_light")]
+	pub light: f32,
+	#[serde(rename = "logical_height")]
+	pub height: u32,
+	#[serde(rename = "coordinate_scale")]
+	pub scale: f64,
+	pub natural: bool,
+	#[serde(rename = "has_ceiling")]
+	pub ceiling: bool,
+	pub ultrawarm: bool
+}
+
+#[derive(Debug)]
+pub struct Biome {
+	pub precipitation: String,
+	pub depth: f32,
+	pub temperature: f32,
+	pub scale: f32,
+	pub downfall: f32,
+	pub category: String,
+
+	pub color_sky: u32,
+	pub color_water: u32,
+	pub color_fog: u32,
+	pub color_water_fog: u32,
+
+	pub mood_tick_delay: u32,
+	pub mood_offset: f64,
+	pub mood_sound: String,
+	pub mood_block_search_extent: u32
+}
+
+impl Serialize for Biome {
+	fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+			where S: Serializer {
+		struct Effects<'r>(&'r Biome);
+
+		impl<'r> Serialize for Effects<'r> {
+			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+					where S: Serializer {
+				let mut map = serializer.serialize_map(Some(5))?;
+				map.serialize_entry("sky_color", &self.0.color_sky)?;
+				map.serialize_entry("water_fog_color", &self.0.color_water_fog)?;
+				map.serialize_entry("fog_color", &self.0.color_fog)?;
+				map.serialize_entry("water_color", &self.0.color_water)?;
+				map.serialize_entry("mood_sound", &MoodSound(&self.0))?;
+				map.end()
+			}
+		}
+
+		struct MoodSound<'r>(&'r Biome);
+
+		impl<'r> Serialize for MoodSound<'r> {
+			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+					where S: Serializer {
+				let mut map = serializer.serialize_map(Some(4))?;
+				map.serialize_entry("tick_delay", &self.0.mood_tick_delay)?;
+				map.serialize_entry("offset", &self.0.mood_offset)?;
+				map.serialize_entry("sound", &self.0.mood_sound)?;
+				map.serialize_entry("block_search_extent",
+					&self.0.mood_block_search_extent)?;
+				map.end()
+			}
+		}
+
+		let mut map = serializer.serialize_map(Some(7))?;
+		map.serialize_entry("precipitation", &self.precipitation)?;
+		map.serialize_entry("depth", &self.depth)?;
+		map.serialize_entry("temperature", &self.temperature)?;
+		map.serialize_entry("scale", &self.scale)?;
+		map.serialize_entry("downfall", &self.downfall)?;
+		map.serialize_entry("category", &self.category)?;
+		map.serialize_entry("effects", &Effects(&self))?;
+		map.end()
+	}
+}
+
+use std::collections::HashMap;
+
+#[derive(Debug)]
+pub struct DimensionCodec {
+	pub dimensions: HashMap<String, Dimension>,
+	pub biomes: HashMap<String, Biome>
+}
+
+impl Serialize for DimensionCodec {
+	fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+			where S: Serializer {
+		struct Entry<'r, V>(u32, &'r str, &'r V)
+			where V: Serialize;
+
+		impl<'r, V> Serialize for Entry<'r, V>
+				where V: Serialize {
+			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+					where S: Serializer {
+				let mut map = serializer.serialize_map(Some(3))?;
+				map.serialize_entry("name", self.1)?;
+				map.serialize_entry("id", &self.0)?;
+				map.serialize_entry("element", self.2)?;
+				map.end()
+			}
+		}
+
+		struct Entries<'r, V>(&'r HashMap<String, V>)
+			where V: Serialize;
+
+		impl<'r, V> Serialize for Entries<'r, V>
+				where V: Serialize {
+			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+					where S: Serializer {
+				let mut list = serializer.serialize_seq(Some(self.0.len()))?;
+				self.0.iter().enumerate().try_for_each(|(index, (key, value))|
+					list.serialize_element(&Entry(index as u32, key, value)))?;
+				list.end()
+			}
+		}
+
+		struct Category<'r, V>(&'r str, &'r HashMap<String, V>)
+			where V: Serialize;
+
+		impl<'r, V> Serialize for Category<'r, V>
+				where V: Serialize {
+			fn serialize<S>(&self, serializer: S) -> STDResult<S::Ok, S::Error>
+					where S: Serializer {
+				let mut map = serializer.serialize_map(Some(2))?;
+				map.serialize_entry("type", self.0)?;
+				map.serialize_entry("value", &Entries(&self.1))?;
+				map.end()
+			}
+		}
+
+		const DIMENSION: &str = "minecraft:dimension_type";
+		const BIOME: &str = "minecraft:worldgen/biome";
+
+		let mut map = serializer.serialize_map(Some(2))?;
+		map.serialize_entry(DIMENSION, &Category(DIMENSION, &self.dimensions))?;
+		map.serialize_entry(BIOME, &Category(BIOME, &self.biomes))?;
+		map.end()
 	}
 }

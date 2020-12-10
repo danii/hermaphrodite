@@ -1,0 +1,8 @@
+[package]
+name = "serde-primitives-macro"
+version = "0.1.0"
+authors = ["Daniel Conley <danielc030417@gmail.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true

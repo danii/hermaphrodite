@@ -1,0 +1,9 @@
+[package]
+name = "serde-primitives"
+version = "0.1.0"
+authors = ["Daniel Conley <danielc030417@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0.117"
+serde-primitives-macro = {path = "../serde-primitives-macro"}

@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 hermaphrodite = {path = "../hermaphrodite"}
 java-intake = {path = "../java-intake"}
+serde = "*"

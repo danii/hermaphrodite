@@ -22,6 +22,7 @@ version = "0.1.0"
 dependencies = [
  "hermaphrodite",
  "java-intake",
+ "serde",
 ]
 
 [[package]]
@@ -57,6 +58,7 @@ version = "0.1.0"
 dependencies = [
  "hermaphrodite",
  "serde",
+ "serde-primitives",
  "serde_json",
 ]
 
@@ -108,6 +110,18 @@ checksum = "b88fa983de7720629c9387e9f517353ed404164b1e482c970a90c1a4aaf7dc1a"
 dependencies = [
  "serde_derive",
 ]
+
+[[package]]
+name = "serde-primitives"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde-primitives-macro",
+]
+
+[[package]]
+name = "serde-primitives-macro"
+version = "0.1.0"
 
 [[package]]
 name = "serde_derive"

@@ -3,5 +3,7 @@ members = [
 	"hermaphrodite",
 	"java-intake",
 	"bedrock-intake",
-	"compile-in"
+	"compile-in",
+	"serde-primitives",
+	"serde-primitives-macro"
 ]
