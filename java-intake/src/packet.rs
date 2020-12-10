@@ -1,7 +1,4 @@
-use self::super::{
-	nbt::Serializer as NBTSerializer,
-	types::{Bound, Read, State, Write}
-};
+use self::super::types::{Bound, Read, State, Write};
 use serde::{ser::{SerializeMap, SerializeSeq, Serializer}, Serialize};
 use serde_json::to_string;
 use std::{
@@ -248,7 +245,7 @@ impl PacketLiterate for StatusRequest {
 		todo!()
 	}
 
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self.into())
 	}
 }
@@ -277,7 +274,7 @@ impl PacketLiterate for StatusResponse {
 	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
 		writer.string(&to_string(self).unwrap())
 	}
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -347,7 +344,7 @@ impl PacketLiterate for StatusPing {
 		writer.long(self.0)
 	}
 
-	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.long()?).into())
 	}
 }
@@ -370,7 +367,7 @@ impl PacketLiterate for StatusPong {
 		writer.long(self.0)
 	}
 
-	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.long()?).into())
 	}
 }
@@ -393,7 +390,7 @@ impl PacketLiterate for LoginStart {
 		todo!()
 	}
 
-	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.string()?.0).into())
 	}
 }
@@ -416,7 +413,7 @@ impl PacketLiterate for LoginCompression {
 		writer.variable_integer(self.0 as i32)
 	}
 
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -443,7 +440,7 @@ impl PacketLiterate for LoginSuccess {
 		writer.string(&self.username)
 	}
 
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 
@@ -466,11 +463,11 @@ impl PacketLiterate for PlayTeleportConfirm {
 	const PACKET_BOUND: Bound = Bound::Server;
 	const PACKET_ID: u32 = 0;
 
-	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
 		todo!()
 	}
 
-	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.variable_integer()?.0 as u32).into())
 	}
 }
@@ -500,7 +497,7 @@ impl PacketLiterate for PlayClientSettings {
 		todo!()
 	}
 
-	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self {
 			locale: reader.string()?.0,
 			view_distance: reader.byte()? as u8,
@@ -529,7 +526,7 @@ impl PacketLiterate for PlayPluginMessageClient {
 	const PACKET_BOUND: Bound = Bound::Server;
 	const PACKET_ID: u32 = 11;
 
-	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
 		todo!()
 	}
 
@@ -566,7 +563,7 @@ impl PacketLiterate for PlayPlayerPositionRotationClient {
 	const PACKET_BOUND: Bound = Bound::Server;
 	const PACKET_ID: u32 = 19;
 
-	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
 		todo!()
 	}
 
@@ -634,7 +631,7 @@ impl PacketLiterate for PlayJoinGame {
 		Ok(())
 	}
 
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -671,7 +668,7 @@ impl PacketLiterate for PlayPlayerPositionRotationServer {
 		writer.variable_integer(self.teleport_id)
 	}
 
-	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }

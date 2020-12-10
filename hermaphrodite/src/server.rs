@@ -63,7 +63,7 @@ impl std::hash::Hash for Player {
 }
 
 impl std::cmp::PartialEq for Player {
-	fn eq(&self, other: &Self) -> bool {
+	fn eq(&self, _other: &Self) -> bool {
 		true
 	}
 }

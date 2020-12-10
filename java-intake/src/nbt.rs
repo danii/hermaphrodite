@@ -5,7 +5,6 @@ use serde::ser::{
 };
 use serde_primitives::StringSerializer;
 use std::{
-	convert::TryFrom,
 	error::Error as STDError,
 	fmt::{Display, Formatter, Result as FMTResult},
 	io::{Error as IOError, ErrorKind as IOErrorKind, Result as IOResult, Write},
@@ -55,7 +54,7 @@ impl <W> Serializer<W>
 				self.action = WriteAction::None;
 				self.serialize_str(&name)?;
 			},
-			WriteAction::List(compound, list_type, length) => match list_type {
+			WriteAction::List(compound, list_type, len) => match list_type {
 				// If this is the first value of the list (represented by the stored
 				// type ID being TAG_End), then we must write the type ID of the types
 				// we're storing.
@@ -65,7 +64,7 @@ impl <W> Serializer<W>
 					*list_type = tag_type;
 
 					// Borrow checker stuff.
-					let length = length.to_be_bytes();
+					let len = len.to_be_bytes();
 
 					// If compound is Some, that means this is a named list, and we
 					// skipped writing the type and name information last time, so we
@@ -110,7 +109,7 @@ impl <W> Serializer<W>
 
 					// Write this list's length. Thankfully, the size of the length field
 					// is the same regardless if this is a type specific array.
-					self.writer.write(&length)?;
+					self.writer.write(&len)?;
 				},
 
 				// If the type ID we have stored is the same type ID as we're about to
@@ -174,14 +173,14 @@ impl <W> Serializer<W>
 
 	/// This handles calling write_header for us.
 	#[inline]
-	fn list_start(&mut self, length: impl Into<Option<usize>>)
+	fn list_start(&mut self, len: impl Into<Option<usize>>)
 			-> Result<()> {
 		// I expect this to be optimized away when length is passed a usize.
-		match length.into() {
-			Some(length) => {
+		match len.into() {
+			Some(len) => {
 				// If we know the length of this list, first make sure it's in range
 				// of a u32, then set the write action to a list.
-				if length > u32::MAX as usize {
+				if len > u32::MAX as usize {
 					return Err(Error::Custom("Oops".to_owned().into_boxed_str()))
 				}
 
@@ -194,7 +193,7 @@ impl <W> Serializer<W>
 					}
 				};
 
-				self.action = WriteAction::List(compound, 0, length as u32)
+				self.action = WriteAction::List(compound, 0, len as u32)
 			},
 			None => {
 				// Otherwise, we have to use a buffer... Once again, be sure to use the
@@ -227,7 +226,7 @@ impl <W> Serializer<W>
 	fn list_increment_length(&mut self) -> Result<()> {
 		match &mut self.action {
 			WriteAction::List(..) => (),
-			WriteAction::DynamicList(_, length, ..) => *length = *length + 1,
+			WriteAction::DynamicList(_, len, ..) => *len = *len + 1,
 			_ => return Err(Error::Custom("bruh".to_owned().into_boxed_str()))
 		}
 
@@ -331,7 +330,7 @@ impl<'r, W> SerDeSerializer for &'r mut Serializer <W>
 		Ok(())
 	}
 
-	fn serialize_char(self, value: char) -> Result<()> {
+	fn serialize_char(self, _value: char) -> Result<()> {
 		todo!()
 	}
 
@@ -344,7 +343,7 @@ impl<'r, W> SerDeSerializer for &'r mut Serializer <W>
 		Ok(())
 	}
 
-	fn serialize_bytes(self, value: &[u8]) -> Result<()> {
+	fn serialize_bytes(self, _value: &[u8]) -> Result<()> {
 		todo!()
 	}
 
@@ -352,44 +351,44 @@ impl<'r, W> SerDeSerializer for &'r mut Serializer <W>
 		todo!()
 	}
 
-	fn serialize_some<T: ?Sized>(self, value: &T) -> Result<()>
+	fn serialize_some<T: ?Sized>(self, _value: &T) -> Result<()>
 			where T: Serialize {
 		todo!()
 	}
 
-	fn serialize_unit_struct(self, name: &'static str) -> Result<()> {
+	fn serialize_unit_struct(self, _name: &'static str) -> Result<()> {
 		todo!()
 	}
 
-	fn serialize_unit_variant(self, name: &'static str, index: u32, variant: &'static str) -> Result<()> {
+	fn serialize_unit_variant(self, _name: &'static str, _index: u32, _variant: &'static str) -> Result<()> {
 		todo!()
 	}
 
-	fn serialize_newtype_struct<T: ?Sized>(self, name: &'static str, value: &T) -> Result<()>
+	fn serialize_newtype_struct<T: ?Sized>(self, _name: &'static str, _value: &T) -> Result<()>
 			where T: Serialize {
 		todo!()
 	}
 
-	fn serialize_newtype_variant<T: ?Sized>(self, name: &'static str, index: u32, variant: &'static str, value: &T) -> Result<()>
+	fn serialize_newtype_variant<T: ?Sized>(self, _name: &'static str, _index: u32, _variant: &'static str, _value: &T) -> Result<()>
 			where T: Serialize {
 		todo!()
 	}
 
-	fn serialize_tuple_struct(self, name: &'static str, length: usize) -> Result<Self::SerializeTupleStruct> {
-		self.list_start(length)?;
+	fn serialize_tuple_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeTupleStruct> {
+		self.list_start(len)?;
 		Ok(self)
 	}
 
-	fn serialize_tuple_variant(self, name: &'static str, index: u32, variant: &'static str, len: usize) -> Result<Self::SerializeTupleVariant> {
+	fn serialize_tuple_variant(self, _name: &'static str, _index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeTupleVariant> {
 		todo!()
 	}
 
-	fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self> {
+	fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self> {
 		self.write_header(10)?;
 		Ok(self)
 	}
 
-	fn serialize_struct_variant(self, name: &'static str, index: u32, variant: &'static str, len: usize) -> Result<Self::SerializeStructVariant> {
+	fn serialize_struct_variant(self, _name: &'static str, _index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeStructVariant> {
 		todo!()
 	}
 
@@ -397,13 +396,13 @@ impl<'r, W> SerDeSerializer for &'r mut Serializer <W>
 		todo!()
 	}
 
-	fn serialize_tuple(self, length: usize) -> Result<Self> {
-		self.list_start(length)?;
+	fn serialize_tuple(self, len: usize) -> Result<Self> {
+		self.list_start(len)?;
 		Ok(self)
 	}
 
-	fn serialize_seq(self, length: Option<usize>) -> Result<Self> {
-		self.list_start(length)?;
+	fn serialize_seq(self, len: Option<usize>) -> Result<Self> {
+		self.list_start(len)?;
 		Ok(self)
 	}
 
