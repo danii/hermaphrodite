@@ -496,14 +496,11 @@ impl PacketLiterate for PlayPluginMessageClient {
 
 	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
 		let (channel, channel_read) = reader.string()?;
-		let len = len - channel_read;
-
-		println!("{:?} {} {}", channel, len, channel_read);
 
 		Ok(Self {
 			channel,
-			data: (0..len - 1)
-				.map(|_| reader.byte().map(|data| {println!("{}", data); data as u8}))
+			data: (0..len - channel_read)
+				.map(|_| reader.byte().map(|data| data as u8))
 				.collect::<Result<Vec<_>>>()?
 		}.into())
 	}

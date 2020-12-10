@@ -65,9 +65,11 @@ impl Socket {
 				if self.read_buffer.len() > size {Err(Error::new(
 					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
-				let packet_id = Read::variable_integer(&mut self.read_buffer)?.0 as u32;
-				match Packet::deserialize(size, &mut self.read_buffer, self.state,
-						self.bound.receiving_bound(), packet_id).transpose()? {
+				let (packet_id, read) = Read::variable_integer(&mut self.read_buffer)?;
+				let packet = Packet::deserialize(size - read, &mut self.read_buffer,
+					self.state, self.bound.receiving_bound(), packet_id as u32);
+
+				match packet.transpose()? {
 					Some(packet) => packet,
 					None => Err(Error::new(ErrorKind::InvalidData, format!(
 						"Bad packet ID {} for STATE {:?}.", packet_id, self.state)))?
