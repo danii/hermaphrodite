@@ -1,4 +1,4 @@
-#![feature(decl_macro, never_type, try_blocks, try_trait)]
+#![feature(decl_macro, never_type, slice_ptr_len, try_blocks, try_trait)]
 
 pub mod nbt;
 pub mod packet;
