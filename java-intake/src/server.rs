@@ -37,9 +37,13 @@ pub fn run_server<'s, S>(server: Arc<S>, address: impl ToSocketAddrs)
 
 pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 		server: &S) -> Result<()> where S: MinecraftServer<'s> {
-	println!("{:?}", packet);
 	match packet {
-		Packet::Handshake(_) | Packet::PlayClientSettings(_) => Ok(()),
+		Packet::Handshake(_)
+			| Packet::PlayClientSettings(_)
+			| Packet::PlayPluginMessageClient(_)
+			| Packet::PlayTeleportConfirm(_)
+			| Packet::PlayPlayerPositionRotationClient(_) =>
+				Ok(()),
 		Packet::StatusRequest(_) => socket.send(vec![
 			StatusResponse {
 				protocol_name: "1.16.4".to_owned(),
@@ -89,9 +93,6 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 					teleport_id: 0
 				}.into()
 			])
-		},
-		Packet::PlayPluginMessageClient(packet) => {
-			Ok(())
 		},
 		_ => Err(Error::new(ErrorKind::InvalidData,
 			format!("Idk this packet, {:?}.", packet)))

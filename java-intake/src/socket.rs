@@ -1,9 +1,8 @@
 use self::super::{packet::Packet, types::{Bound, Read, State, Write}};
 use std::{
+	collections::VecDeque,
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite, copy},
-	mem::swap,
-	net::TcpStream, result::Result as STDResult,
-	slice::from_raw_parts_mut as slice_from_raw_parts_mut
+	net::TcpStream, result::Result as STDResult
 };
 
 pub struct Socket {
@@ -30,6 +29,7 @@ impl Socket {
 
 	pub fn send(&mut self, packets: Vec<Packet>) -> Result<()> {
 		packets.iter().map::<Result<()>, _>(|packet| {
+			eprintln!("< {:?}", packet);
 			if let Some(state) = packet.next_state() {
 				self.state = state
 			}
@@ -62,7 +62,7 @@ impl Socket {
 		loop {
 			let packet: Result<Packet> = try {
 				let size = Read::variable_integer(&mut self.read_buffer)?.0 as usize;
-				if self.read_buffer.len() > size {Err(Error::new(
+				if self.read_buffer.len() < size {Err(Error::new(
 					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
 				let (packet_id, read) = Read::variable_integer(&mut self.read_buffer)?;
@@ -85,6 +85,8 @@ impl Socket {
 					}
 				},
 				Ok(packet) => {
+					eprintln!("> {:?}", packet);
+
 					self.read_buffer.mark_as_read();
 					if let Some(state) = packet.next_state() {self.state = state}
 					packets.push(packet);
@@ -108,11 +110,11 @@ impl Socket {
 /// While this is meant to be used as a buffer, data has to be written manually
 /// to it via the Write implementation.
 #[derive(Debug)]
-struct ReadBuffer(Box<[u8]>, usize);
+struct ReadBuffer(VecDeque<u8>, usize);
 
 impl ReadBuffer {
 	fn new() -> Self {
-		Self(Box::new([]), 0)
+		Self(VecDeque::new(), 0)
 	}
 
 	/// Returns the amount of bytes left available for reading. This accounts for
@@ -128,42 +130,15 @@ impl ReadBuffer {
 
 	/// Marks this buffer as read, discarding all data previously read.
 	fn mark_as_read(&mut self) {
-		// Take ownership for a hot minute, so we can avoid copying. All allocation
-		// here will be done for us by Box, a technique I'm frankly really happy
-		// about.
-		let mut local: Box<[u8]> = Box::new([]);
-		swap(&mut self.0, &mut local);
-
-		// Get a raw pointer to the box.
-		let local = Box::into_raw(local);
-		let mut local = unsafe {
-			// Here we effectively split the box into two around the cursor, dropping
-			// the first half.
-
-			// SAFETY: We just obtained this pointer from a box, so we know it's from
-			// the heap. Using slice_from_raw_parts_mut simply resizes the box, and
-			// we ensure the invariant that cursor 1 is never larger than the buffer.
-			// (Infact, if the cursor is larger than the buffer, local_len should
-			// panic first due to subtraction underflow.)
-			let local_offset = (local as *mut u8).offset(self.1 as isize);
-			let local_len = local.len() - self.1;
-
-			// First half. Dropped.
-			Box::from_raw(slice_from_raw_parts_mut(local as *mut u8, self.1));
-			// Second half.
-			Box::from_raw(slice_from_raw_parts_mut(local_offset, local_len))
-		};
-
-		// Give ownership back.
-		swap(&mut self.0, &mut local);
+		self.0.drain(0..self.1); // Drain the range.
 		self.1 = 0 // Set the cursor in accordance with our changes.
 	}
 }
 
 impl IORead for ReadBuffer {
 	fn read(&mut self, mut buffer: &mut [u8]) -> Result<usize> {
-		// Cool trick here, read via write.
-		let count = buffer.write(&self.0[self.1..])?;
+		// Read via write.
+		let count = buffer.write(&self.0.make_contiguous()[self.1..])?;
 		self.1 = self.1 + count;
 		Ok(count)
 	}
@@ -171,18 +146,7 @@ impl IORead for ReadBuffer {
 
 impl IOWrite for ReadBuffer {
 	fn write(&mut self, buffer: &[u8]) -> Result<usize> {
-		// Take ownership for a hot minute, so we can avoid copying. All allocation
-		// here will be done for us by a Vec.
-		let mut local: Box<[u8]> = Box::new([]); // *Should* not allocate.
-		swap(&mut self.0, &mut local);
-
-		let mut local = local.into_vec();
-		// extend_from_slice does a good enough job of reserving, via size hints.
-		local.extend_from_slice(buffer);
-
-		// Give ownership back.
-		let mut local = local.into_boxed_slice();
-		swap(&mut self.0, &mut local);
+		self.0.extend(buffer); // Extend the buffer.
 		Ok(buffer.len())
 	}
 

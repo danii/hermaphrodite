@@ -84,6 +84,9 @@ pub trait Read {
 	fn unsigned_long(&mut self) -> Result<u64>;
 	fn uuid(&mut self) -> Result<u128>;
 
+	fn float(&mut self) -> Result<f32>;
+	fn double(&mut self) -> Result<f64>;
+
 	fn nbt<'de, T>(&mut self) -> Result<T>
 		where T: Deserialize<'de>;
 	fn string(&mut self) -> Result<(String, usize)>;
@@ -108,6 +111,9 @@ impl<R> Read for R
 	read_primitive_type!(u32, unsigned_int);
 	read_primitive_type!(u64, unsigned_long);
 	read_primitive_type!(u128, uuid);
+
+	read_primitive_type!(f32, float);
+	read_primitive_type!(f64, double);
 
 	fn nbt<'de, T>(&mut self) -> Result<T>
 			where T: Deserialize<'de> {
