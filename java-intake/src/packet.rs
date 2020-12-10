@@ -10,13 +10,13 @@ use std::{
 	result::Result as STDResult
 };
 
-pub trait PacketLiterate: Debug + Sized {
+pub trait PacketLiterate: Clone + Debug + Sized {
 	const PACKET_STATE: State;
 	const PACKET_BOUND: Bound;
 	const PACKET_ID: u32;
 
 	fn serialize(&self, writer: &mut impl Write) -> Result<()>;
-	fn deserialize(reader: &mut impl Read) -> Result<Packet>;
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet>;
 
 	fn next_state(&self) -> Option<State> {
 		None
@@ -32,6 +32,8 @@ pub enum Packet {
 	LoginStart(LoginStart),
 	LoginCompression(LoginCompression),
 	LoginSuccess(LoginSuccess),
+	PlayClientSettings(PlayClientSettings),
+	PlayPluginMessageClient(PlayPluginMessageClient),
 	PlayJoinGame(PlayJoinGame),
 	PlayPlayerPositionRotationServer(PlayPlayerPositionRotationServer)
 }
@@ -62,6 +64,10 @@ macro constant_fetcher($name:ident(), $constant:ident, $result:ident) {
 				LoginSuccess::$constant,
 
 			// Play
+			Self::PlayClientSettings(_) =>
+				PlayClientSettings::$constant,
+			Self::PlayPluginMessageClient(_) =>
+				PlayPluginMessageClient::$constant,
 			Self::PlayJoinGame(_) =>
 				PlayJoinGame::$constant,
 			Self::PlayPlayerPositionRotationServer(_) =>
@@ -96,6 +102,10 @@ macro trait_impl($traitt:ident::$name:ident($($arg:ident: $arg_ty:ty),*), $resul
 				$traitt::$name(packet, $($arg),*),
 
 			// Play
+			Self::PlayClientSettings(packet) =>
+				$traitt::$name(packet, $($arg),*),
+			Self::PlayPluginMessageClient(packet) =>
+				$traitt::$name(packet, $($arg),*),
 			Self::PlayJoinGame(packet) =>
 				$traitt::$name(packet, $($arg),*),
 			Self::PlayPlayerPositionRotationServer(packet) =>
@@ -111,35 +121,39 @@ impl Packet {
 	trait_impl!(PacketLiterate::serialize(writer: &mut impl Write), Result<()>);
 	trait_impl!(PacketLiterate::next_state(), Option<State>);
 
-	pub fn deserialize(reader: &mut impl Read, state: State, bound: Bound, id: u32) -> Option<Result<Packet>> {
+	pub fn deserialize(len: usize, reader: &mut impl Read, state: State, bound: Bound, id: u32) -> Option<Result<Packet>> {
 		Some(match (state, bound, id) {
 			// Handshake
 			(Handshake::PACKET_STATE, Handshake::PACKET_BOUND, Handshake::PACKET_ID) =>
-				Handshake::deserialize(reader),
+				Handshake::deserialize(len, reader),
 
 			// Status
 			(StatusRequest::PACKET_STATE, StatusRequest::PACKET_BOUND, StatusRequest::PACKET_ID) =>
-				StatusRequest::deserialize(reader),
+				StatusRequest::deserialize(len, reader),
 			(StatusResponse::PACKET_STATE, StatusResponse::PACKET_BOUND, StatusResponse::PACKET_ID) =>
-				StatusResponse::deserialize(reader),
+				StatusResponse::deserialize(len, reader),
 			(StatusPing::PACKET_STATE, StatusPing::PACKET_BOUND, StatusPing::PACKET_ID) =>
-				StatusPing::deserialize(reader),
+				StatusPing::deserialize(len, reader),
 			(StatusPong::PACKET_STATE, StatusPong::PACKET_BOUND, StatusPong::PACKET_ID) =>
-				StatusPong::deserialize(reader),
+				StatusPong::deserialize(len, reader),
 
 			// Login
 			(LoginStart::PACKET_STATE, LoginStart::PACKET_BOUND, LoginStart::PACKET_ID) =>
-				LoginStart::deserialize(reader),
+				LoginStart::deserialize(len, reader),
 			(LoginCompression::PACKET_STATE, LoginCompression::PACKET_BOUND, LoginCompression::PACKET_ID) =>
-				LoginCompression::deserialize(reader),
+				LoginCompression::deserialize(len, reader),
 			(LoginSuccess::PACKET_STATE, LoginSuccess::PACKET_BOUND, LoginSuccess::PACKET_ID) =>
-				LoginSuccess::deserialize(reader),
+				LoginSuccess::deserialize(len, reader),
 
 			// Play
+			(PlayClientSettings::PACKET_STATE, PlayClientSettings::PACKET_BOUND, PlayClientSettings::PACKET_ID) =>
+				PlayClientSettings::deserialize(len, reader),
+			(PlayPluginMessageClient::PACKET_STATE, PlayPluginMessageClient::PACKET_BOUND, PlayPluginMessageClient::PACKET_ID) =>
+				PlayPluginMessageClient::deserialize(len, reader),
 			(PlayJoinGame::PACKET_STATE, PlayJoinGame::PACKET_BOUND, PlayJoinGame::PACKET_ID) =>
-				PlayJoinGame::deserialize(reader),
+				PlayJoinGame::deserialize(len, reader),
 			(PlayPlayerPositionRotationServer::PACKET_STATE, PlayPlayerPositionRotationServer::PACKET_BOUND, PlayPlayerPositionRotationServer::PACKET_ID) =>
-				PlayPlayerPositionRotationServer::deserialize(reader),
+				PlayPlayerPositionRotationServer::deserialize(len, reader),
 
 			// ???
 			_ => return None
@@ -158,13 +172,15 @@ impl Debug for Packet {
 			Self::LoginStart(packet) => write!(f, "{:?}", packet),
 			Self::LoginCompression(packet) => write!(f, "{:?}", packet),
 			Self::LoginSuccess(packet) => write!(f, "{:?}", packet),
+			Self::PlayClientSettings(packet) => write!(f, "{:?}", packet),
+			Self::PlayPluginMessageClient(packet) => write!(f, "{:?}", packet),
 			Self::PlayJoinGame(packet) => write!(f, "{:?}", packet),
 			Self::PlayPlayerPositionRotationServer(packet) => write!(f, "{:?}", packet)
 		}
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Handshake {
 	pub protocol_version: u32,
 	pub address: (String, u16),
@@ -180,11 +196,11 @@ impl PacketLiterate for Handshake {
 		todo!()
 	}
 
-	fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self {
-			protocol_version: reader.variable_integer()? as u32,
-			address: (reader.string()?, reader.unsigned_short()?),
-			next_state: match reader.variable_integer()? {
+			protocol_version: reader.variable_integer()?.0 as u32,
+			address: (reader.string()?.0, reader.unsigned_short()?),
+			next_state: match reader.variable_integer()?.0 {
 				1 => State::Status,
 				2 => State::Login,
 				num => return Err(Error::new(ErrorKind::InvalidData,
@@ -204,7 +220,7 @@ impl Into<Packet> for Handshake {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StatusRequest;
 
 impl PacketLiterate for StatusRequest {
@@ -216,7 +232,7 @@ impl PacketLiterate for StatusRequest {
 		todo!()
 	}
 
-	fn deserialize(_: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		Ok(Self.into())
 	}
 }
@@ -227,7 +243,7 @@ impl Into<Packet> for StatusRequest {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StatusResponse {
 	pub protocol_name: String,
 	pub protocol_version: u32,
@@ -245,7 +261,7 @@ impl PacketLiterate for StatusResponse {
 	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
 		writer.string(&to_string(self).unwrap())
 	}
-  fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -303,7 +319,7 @@ impl Into<Packet> for StatusResponse {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StatusPing(pub i64);
 
 impl PacketLiterate for StatusPing {
@@ -314,7 +330,8 @@ impl PacketLiterate for StatusPing {
 	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
 		writer.long(self.0)
 	}
-  fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.long()?).into())
 	}
 }
@@ -325,7 +342,7 @@ impl Into<Packet> for StatusPing {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StatusPong(pub i64);
 
 impl PacketLiterate for StatusPong {
@@ -336,7 +353,8 @@ impl PacketLiterate for StatusPong {
 	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
 		writer.long(self.0)
 	}
-  fn deserialize(reader: &mut impl Read) -> Result<Packet> {
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
 		Ok(Self(reader.long()?).into())
 	}
 }
@@ -347,7 +365,7 @@ impl Into<Packet> for StatusPong {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LoginStart(pub String);
 
 impl PacketLiterate for LoginStart {
@@ -358,8 +376,9 @@ impl PacketLiterate for LoginStart {
 	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
 		todo!()
 	}
-  fn deserialize(reader: &mut impl Read) -> Result<Packet> {
-		Ok(Self(reader.string()?).into())
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self(reader.string()?.0).into())
 	}
 }
 
@@ -369,7 +388,7 @@ impl Into<Packet> for LoginStart {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LoginCompression(pub u32);
 
 impl PacketLiterate for LoginCompression {
@@ -381,7 +400,7 @@ impl PacketLiterate for LoginCompression {
 		writer.variable_integer(self.0 as i32)
 	}
 
-	fn deserialize(_: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -392,7 +411,7 @@ impl Into<Packet> for LoginCompression {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LoginSuccess {
 	pub uuid: u128,
 	pub username: String
@@ -408,7 +427,7 @@ impl PacketLiterate for LoginSuccess {
 		writer.string(&self.username)
 	}
 
-	fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 
@@ -423,7 +442,80 @@ impl Into<Packet> for LoginSuccess {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
+pub struct PlayClientSettings {
+	pub locale: String,
+	pub view_distance: u8,
+	pub chat_mode: u8,
+	pub chat_color: bool,
+	pub skin_mask: u8,
+	pub primary_hand: u8
+}
+
+impl PacketLiterate for PlayClientSettings {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 5;
+
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self {
+			locale: reader.string()?.0,
+			view_distance: reader.byte()? as u8,
+			chat_mode: reader.byte()? as u8,
+			chat_color: reader.bool()?,
+			skin_mask: reader.byte()? as u8,
+			primary_hand: reader.variable_integer()?.0 as u8
+		}.into())
+	}
+}
+
+impl Into<Packet> for PlayClientSettings {
+	fn into(self) -> Packet {
+		Packet::PlayClientSettings(self)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayPluginMessageClient {
+	pub channel: String,
+	pub data: Vec<u8>
+}
+
+impl PacketLiterate for PlayPluginMessageClient {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 11;
+
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+		let (channel, channel_read) = reader.string()?;
+		let len = len - channel_read;
+
+		println!("{:?} {} {}", channel, len, channel_read);
+
+		Ok(Self {
+			channel,
+			data: (0..len - 1)
+				.map(|_| reader.byte().map(|data| {println!("{}", data); data as u8}))
+				.collect::<Result<Vec<_>>>()?
+		}.into())
+	}
+}
+
+impl Into<Packet> for PlayPluginMessageClient {
+	fn into(self) -> Packet {
+		Packet::PlayPluginMessageClient(self)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct PlayJoinGame {
 	pub entity_id: u32,
 
@@ -469,7 +561,7 @@ impl PacketLiterate for PlayJoinGame {
 		Ok(())
 	}
 
-	fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -480,7 +572,7 @@ impl Into<Packet> for PlayJoinGame {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PlayPlayerPositionRotationServer {
 	pub x: f64,
 	pub y: f64,
@@ -506,7 +598,7 @@ impl PacketLiterate for PlayPlayerPositionRotationServer {
 		writer.variable_integer(self.teleport_id)
 	}
 
-  fn deserialize(_reader: &mut impl Read) -> Result<Packet> {
+	fn deserialize(_: usize, _: &mut impl Read) -> Result<Packet> {
 		todo!()
 	}
 }
@@ -547,7 +639,7 @@ pub struct Dimension {
 	pub ultrawarm: bool
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Biome {
 	pub precipitation: String,
 	pub depth: f32,
@@ -614,7 +706,7 @@ impl Serialize for Biome {
 
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DimensionCodec {
 	pub dimensions: HashMap<String, Dimension>,
 	pub biomes: HashMap<String, Biome>

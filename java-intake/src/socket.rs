@@ -7,7 +7,7 @@ use std::{
 pub struct Socket {
 	socket: TcpStream,
 	bound: Bound,
-	compression: Option<i32>,
+	_compression: Option<i32>,
 
 	state: State,
 	read_buffer: ReadBuffer
@@ -20,7 +20,7 @@ impl Socket {
 		Self {
 			socket,
 			bound: Bound::Server,
-			compression: None,
+			_compression: None,
 			state: State::Handshake,
 			read_buffer: ReadBuffer::new()
 		}
@@ -28,7 +28,10 @@ impl Socket {
 
 	pub fn send(&mut self, packets: Vec<Packet>) -> Result<()> {
 		packets.iter().map::<Result<()>, _>(|packet| {
-			println!("{:?}", packet);
+			if let Some(state) = packet.next_state() {
+				self.state = state
+			}
+
 			let mut header = Vec::new();
 			let mut bytes = Vec::new();
 
@@ -56,19 +59,16 @@ impl Socket {
 		let mut packets = Vec::new();
 		loop {
 			let packet: Result<Packet> = try {
-				let size = Read::variable_integer(&mut self.read_buffer)? as usize;
+				let size = Read::variable_integer(&mut self.read_buffer)?.0 as usize;
 				if self.read_buffer.unread() > size {Err(Error::new(
 					ErrorKind::UnexpectedEof, "Unexpected end of file."))?}
 
-				let packet_id = Read::variable_integer(&mut self.read_buffer)? as u32;
-				match Packet::deserialize(&mut self.read_buffer, self.state,
+				let packet_id = Read::variable_integer(&mut self.read_buffer)?.0 as u32;
+				match Packet::deserialize(size, &mut self.read_buffer, self.state,
 						self.bound.receiving_bound(), packet_id).transpose()? {
 					Some(packet) => packet,
-					// TODO: IF WE RECEIEVE PACKETS WE DO NOT UNDERSTAND, SIMPLY IGNORE THEM.
-					// This is so you can at least spend 10 seconds in the server in the void when connecting, because hey, that's fun.
-					// (UnexpectedEof isn't treated as an error)
-					None => Err(Error::new(ErrorKind::UnexpectedEof, ""))?/*Err(Error::new(
-						ErrorKind::InvalidData, format!("Bad packet ID {} for STATE {:?}.", packet_id, self.state)))?*/
+					None => Err(Error::new(ErrorKind::InvalidData, format!(
+						"Bad packet ID {} for STATE {:?}.", packet_id, self.state)))?
 				}
 			};
 
@@ -87,6 +87,10 @@ impl Socket {
 				}
 			}
 		}
+	}
+
+	pub fn state(&self) -> State {
+		self.state
 	}
 }
 

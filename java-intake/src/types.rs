@@ -1,12 +1,12 @@
 use self::super::nbt::Serializer as NBTSerializer;
-use serde::ser::Serialize;
+use serde::{de::Deserialize, ser::Serialize};
 use std::{
 	io::{Error, ErrorKind, Read as IORead, Result, Write as IOWrite},
 	mem::{size_of, transmute}, slice::from_mut as slice_mut
 };
 
 macro read_variable_type($target:ty, $unsigned:ty, $name:ident) {
-	fn $name(&mut self) -> Result<$target> {
+	fn $name(&mut self) -> Result<($target, usize)> {
 		let mut result = 0;
 		let mut reads = 0;
 		const TARGET_SIZE: usize = size_of::<$target>();
@@ -14,17 +14,20 @@ macro read_variable_type($target:ty, $unsigned:ty, $name:ident) {
 
 		loop {
 			let mut read = 0;
-			if self.read(slice_mut(&mut read))? == 0 {break Err(Error::new(
-				ErrorKind::UnexpectedEof, format!(
-					"Unexpected end of file while reading {}.", stringify!($name))))}
+			if self.read(slice_mut(&mut read))? == 0 {
+				break Err(Error::new(ErrorKind::UnexpectedEof, format!(
+					"Unexpected end of file while reading {}.", stringify!($name))))
+			}
 
 			result = result | (read as $unsigned & 0b01111111) << 7 * reads;
 			reads = reads + 1;
 
-			if reads > MAX_SIZE.ceil() as usize {break Err(Error::new(
-				ErrorKind::InvalidData, format!("Found {} of more than {} bytes",
-					stringify!($name), MAX_SIZE.ceil() as usize)))}
-			if read & 0b10000000 == 0 {unsafe {break Ok(transmute(result))}}
+			if reads > MAX_SIZE.ceil() as usize {
+				break Err(Error::new(ErrorKind::InvalidData,
+					format!("Found {} of more than {} bytes",
+						stringify!($name), MAX_SIZE.ceil() as usize)))
+			}
+			if read & 0b10000000 == 0 {unsafe {break Ok((transmute(result), reads))}}
 		}
 	}
 }
@@ -66,35 +69,64 @@ macro write_primitive_type($target:ty, $name:ident) {
 }
 
 pub trait Read {
-	fn variable_integer(&mut self) -> Result<i32>;
-	fn variable_long(&mut self) -> Result<i64>;
+	fn variable_integer(&mut self) -> Result<(i32, usize)>;
+	fn variable_long(&mut self) -> Result<(i64, usize)>;
 
+	fn bool(&mut self) -> Result<bool>;
+	fn byte(&mut self) -> Result<i8>;
+	fn short(&mut self) -> Result<i16>;
+	fn int(&mut self) -> Result<i32>;
 	fn long(&mut self) -> Result<i64>;
 
+	fn unsigned_byte(&mut self) -> Result<u8>;
 	fn unsigned_short(&mut self) -> Result<u16>;
+	fn unsigned_int(&mut self) -> Result<u32>;
+	fn unsigned_long(&mut self) -> Result<u64>;
+	fn uuid(&mut self) -> Result<u128>;
 
-	fn string(&mut self) -> Result<String>;
+	fn nbt<'de, T>(&mut self) -> Result<T>
+		where T: Deserialize<'de>;
+	fn string(&mut self) -> Result<(String, usize)>;
 }
 
-impl<T> Read for T
-		where T: IORead {
+impl<R> Read for R
+		where R: IORead {
 	read_variable_type!(i32, u32, variable_integer);
 	read_variable_type!(i64, u64, variable_long);
 
+	fn bool(&mut self) -> Result<bool> {
+		Ok(self.unsigned_byte()? == 1)
+	}
+
+	read_primitive_type!(i8, byte);
+	read_primitive_type!(i16, short);
+	read_primitive_type!(i32, int);
 	read_primitive_type!(i64, long);
 
+	read_primitive_type!(u8, unsigned_byte);
 	read_primitive_type!(u16, unsigned_short);
+	read_primitive_type!(u32, unsigned_int);
+	read_primitive_type!(u64, unsigned_long);
+	read_primitive_type!(u128, uuid);
 
-	fn string(&mut self) -> Result<String> {
-		let size = self.variable_integer()?;
+	fn nbt<'de, T>(&mut self) -> Result<T>
+			where T: Deserialize<'de> {
+		todo!()
+	}
+
+	fn string(&mut self) -> Result<(String, usize)> {
+		let (size, read) = self.variable_integer()?;
 		let mut buffer = vec![0; size as usize];
 		if self.read(&mut buffer)? != buffer.len() {
 			return Err(Error::new(ErrorKind::UnexpectedEof,
 				"Unexpected end of file while reading string."))
 		}
 
-		String::from_utf8(buffer).map_err(|_|
-			Error::new(ErrorKind::InvalidData, "String data was not UTF-8."))
+		let read = read + buffer.len();
+		String::from_utf8(buffer)
+			.map_err(|_|
+				Error::new(ErrorKind::InvalidData, "String data was not UTF-8."))
+			.map(|string| (string, read))
 	}
 }
 
@@ -107,7 +139,7 @@ pub trait Write {
 	fn short(&mut self, value: i16) -> Result<()>;
 	fn int(&mut self, value: i32) -> Result<()>;
 	fn long(&mut self, value: i64) -> Result<()>;
-
+	
 	fn unsigned_byte(&mut self, value: u8) -> Result<()>;
 	fn unsigned_short(&mut self, value: u16) -> Result<()>;
 	fn unsigned_int(&mut self, value: u32) -> Result<()>;

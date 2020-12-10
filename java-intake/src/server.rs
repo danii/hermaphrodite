@@ -16,6 +16,7 @@ use self::super::{
 	socket::Socket
 };
 use hermaphrodite::interface::MinecraftServer;
+use maplit::hashmap;
 use std::{
 	io::{Error, ErrorKind, Result}, sync::Arc,
 	net::{TcpListener, ToSocketAddrs}
@@ -38,7 +39,7 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 		server: &S) -> Result<()> where S: MinecraftServer<'s> {
 	println!("{:?}", packet);
 	match packet {
-		Packet::Handshake(_) => Ok(()),
+		Packet::Handshake(_) | Packet::PlayClientSettings(_) => Ok(()),
 		Packet::StatusRequest(_) => socket.send(vec![
 			StatusResponse {
 				protocol_name: "1.16.4".to_owned(),
@@ -55,57 +56,13 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 		Packet::LoginStart(LoginStart(username)) => {
 			server.new_pov(username.clone().into_boxed_str());
 
-			std::thread::sleep(std::time::Duration::from_millis(1000));
+			let (dimension, dimension_codec) = dimension_and_codecs();
 
 			socket.send(vec![
 				LoginSuccess {
 					uuid: 200,
 					username: username
-				}.into()
-			])?;
-
-			std::thread::sleep(std::time::Duration::from_millis(1000));
-
-			let dim = Dimension {
-				work_anchor: false,
-				work_bed: true,
-				work_piglin: false,
-				work_raids: true,
-				work_skylight: true,
-				category_infiniburn: "minecraft:infiniburn_overworld".to_owned(),
-				category_effects: "minecraft:overworld".to_owned(),
-				light: 0.,
-				height: 256,
-				scale: 1.,
-				natural: true,
-				ceiling: false,
-				ultrawarm: false
-			};
-
-			let mut bs = std::collections::HashMap::new();
-			bs.insert("minecraft:overworld".to_owned(), dim.clone());
-
-			let mut bs2 = std::collections::HashMap::new();
-			bs2.insert("minecraft:plains".to_owned(), Biome {
-				precipitation: "rain".to_owned(),
-				depth: 0.125,
-				temperature: 0.8,
-				scale: 0.05,
-				downfall: 0.4,
-				category: "plains".to_owned(),
-
-				color_sky: 7907327,
-				color_water_fog: 329011,
-				color_fog: 12638463,
-				color_water: 4159204,
-
-				mood_tick_delay: 6000,
-				mood_offset: 2.,
-				mood_sound: "minecraft:ambient.cave".to_owned(),
-				mood_block_search_extent: 8
-			});
-
-			socket.send(vec![
+				}.into(),
 				PlayJoinGame {
 					entity_id: 0,
 					gamemode_current: 1,
@@ -119,17 +76,9 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 					seed_hashed: 0,
 					world_debug: false,
 					world_flat: true,
-					dimension: dim.clone(),
-					dimension_codec: DimensionCodec {
-						dimensions: bs,
-						biomes: bs2
-					}
-				}.into()
-			])?;
-
-			std::thread::sleep(std::time::Duration::from_millis(1000));
-
-			socket.send(vec![
+					dimension,
+					dimension_codec
+				}.into(),
 				PlayPlayerPositionRotationServer {
 					x: 0.,
 					y: 0.,
@@ -141,7 +90,55 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 				}.into()
 			])
 		},
+		Packet::PlayPluginMessageClient(packet) => {
+			Ok(())
+		},
 		_ => Err(Error::new(ErrorKind::InvalidData,
 			format!("Idk this packet, {:?}.", packet)))
 	}
+}
+
+fn dimension_and_codecs() -> (Dimension, DimensionCodec) {
+	let this_dimension = Dimension {
+		work_anchor: false,
+		work_bed: true,
+		work_piglin: false,
+		work_raids: true,
+		work_skylight: true,
+		category_infiniburn: "minecraft:infiniburn_overworld".to_owned(),
+		category_effects: "minecraft:overworld".to_owned(),
+		light: 0.,
+		height: 256,
+		scale: 1.,
+		natural: true,
+		ceiling: false,
+		ultrawarm: false
+	};
+
+	let dimensions = hashmap! {
+		"minecraft:overworld".to_owned() => this_dimension.clone(),
+	};
+
+	let biomes = hashmap! {
+		"minecraft:plains".to_owned() => Biome {
+			precipitation: "rain".to_owned(),
+			depth: 0.125,
+			temperature: 0.8,
+			scale: 0.05,
+			downfall: 0.4,
+			category: "plains".to_owned(),
+
+			color_sky: 7907327,
+			color_water_fog: 329011,
+			color_fog: 12638463,
+			color_water: 4159204,
+
+			mood_tick_delay: 6000,
+			mood_offset: 2.,
+			mood_sound: "minecraft:ambient.cave".to_owned(),
+			mood_block_search_extent: 8
+		}
+	};
+
+	(this_dimension, DimensionCodec {dimensions, biomes})
 }
