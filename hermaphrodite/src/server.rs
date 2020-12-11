@@ -26,7 +26,7 @@ pub struct Player {
 impl Hash for Player {
 	fn hash<H>(&self, hasher: &mut H)
 			where H: Hasher {
-		hasher.write_u8(0)
+		self.username.hash(hasher)
 	}
 }
 

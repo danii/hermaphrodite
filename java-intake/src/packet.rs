@@ -30,9 +30,14 @@ pub enum Packet {
 	LoginCompression(LoginCompression),
 	LoginSuccess(LoginSuccess),
 	PlayTeleportConfirm(PlayTeleportConfirm),
+	PlayChatMessage(PlayChatMessage),
 	PlayClientSettings(PlayClientSettings),
 	PlayPluginMessageClient(PlayPluginMessageClient),
+	PlayPlayerPositionClient(PlayPlayerPositionClient),
 	PlayPlayerPositionRotationClient(PlayPlayerPositionRotationClient),
+	PlayPlayerRotationClient(PlayPlayerRotationClient),
+	PlayPlayerAbilities(PlayPlayerAbilities),
+	PlayChunkData(PlayChunkData),
 	PlayJoinGame(PlayJoinGame),
 	PlayPlayerPositionRotationServer(PlayPlayerPositionRotationServer)
 }
@@ -65,12 +70,22 @@ macro constant_fetcher($name:ident(), $constant:ident, $result:ident) {
 			// Play
 			Self::PlayTeleportConfirm(_) =>
 				PlayTeleportConfirm::$constant,
+			Self::PlayChatMessage(_) =>
+				PlayChatMessage::$constant,
 			Self::PlayClientSettings(_) =>
 				PlayClientSettings::$constant,
 			Self::PlayPluginMessageClient(_) =>
 				PlayPluginMessageClient::$constant,
+			Self::PlayPlayerPositionClient(_) =>
+				PlayPlayerPositionClient::$constant,
 			Self::PlayPlayerPositionRotationClient(_) =>
 				PlayPlayerPositionRotationClient::$constant,
+			Self::PlayPlayerRotationClient(_) =>
+				PlayPlayerRotationClient::$constant,
+			Self::PlayPlayerAbilities(_) =>
+				PlayPlayerAbilities::$constant,
+			Self::PlayChunkData(_) =>
+				PlayChunkData::$constant,
 			Self::PlayJoinGame(_) =>
 				PlayJoinGame::$constant,
 			Self::PlayPlayerPositionRotationServer(_) =>
@@ -107,11 +122,21 @@ macro trait_impl($traitt:ident::$name:ident($($arg:ident: $arg_ty:ty),*), $resul
 			// Play
 			Self::PlayTeleportConfirm(packet) =>
 				$traitt::$name(packet, $($arg),*),
+			Self::PlayChatMessage(packet) =>
+				$traitt::$name(packet, $($arg),*),
 			Self::PlayClientSettings(packet) =>
 				$traitt::$name(packet, $($arg),*),
 			Self::PlayPluginMessageClient(packet) =>
 				$traitt::$name(packet, $($arg),*),
+			Self::PlayPlayerPositionClient(packet) =>
+				$traitt::$name(packet, $($arg),*),
 			Self::PlayPlayerPositionRotationClient(packet) =>
+				$traitt::$name(packet, $($arg),*),
+			Self::PlayPlayerRotationClient(packet) =>
+				$traitt::$name(packet, $($arg),*),
+			Self::PlayPlayerAbilities(packet) =>
+				$traitt::$name(packet, $($arg),*),
+			Self::PlayChunkData(packet) =>
 				$traitt::$name(packet, $($arg),*),
 			Self::PlayJoinGame(packet) =>
 				$traitt::$name(packet, $($arg),*),
@@ -155,12 +180,22 @@ impl Packet {
 			// Play
 			(PlayTeleportConfirm::PACKET_STATE, PlayTeleportConfirm::PACKET_BOUND, PlayTeleportConfirm::PACKET_ID) =>
 				PlayTeleportConfirm::deserialize(len, reader),
+			(PlayChatMessage::PACKET_STATE, PlayChatMessage::PACKET_BOUND, PlayChatMessage::PACKET_ID) =>
+				PlayChatMessage::deserialize(len, reader),
 			(PlayClientSettings::PACKET_STATE, PlayClientSettings::PACKET_BOUND, PlayClientSettings::PACKET_ID) =>
 				PlayClientSettings::deserialize(len, reader),
 			(PlayPluginMessageClient::PACKET_STATE, PlayPluginMessageClient::PACKET_BOUND, PlayPluginMessageClient::PACKET_ID) =>
 				PlayPluginMessageClient::deserialize(len, reader),
+			(PlayPlayerPositionClient::PACKET_STATE, PlayPlayerPositionClient::PACKET_BOUND, PlayPlayerPositionClient::PACKET_ID) =>
+				PlayPlayerPositionClient::deserialize(len, reader),
 			(PlayPlayerPositionRotationClient::PACKET_STATE, PlayPlayerPositionRotationClient::PACKET_BOUND, PlayPlayerPositionRotationClient::PACKET_ID) =>
 				PlayPlayerPositionRotationClient::deserialize(len, reader),
+			(PlayPlayerRotationClient::PACKET_STATE, PlayPlayerRotationClient::PACKET_BOUND, PlayPlayerRotationClient::PACKET_ID) =>
+				PlayPlayerRotationClient::deserialize(len, reader),
+			(PlayPlayerAbilities::PACKET_STATE, PlayPlayerAbilities::PACKET_BOUND, PlayPlayerAbilities::PACKET_ID) =>
+				PlayPlayerAbilities::deserialize(len, reader),
+			(PlayChunkData::PACKET_STATE, PlayChunkData::PACKET_BOUND, PlayChunkData::PACKET_ID) =>
+				PlayChunkData::deserialize(len, reader),
 			(PlayJoinGame::PACKET_STATE, PlayJoinGame::PACKET_BOUND, PlayJoinGame::PACKET_ID) =>
 				PlayJoinGame::deserialize(len, reader),
 			(PlayPlayerPositionRotationServer::PACKET_STATE, PlayPlayerPositionRotationServer::PACKET_BOUND, PlayPlayerPositionRotationServer::PACKET_ID) =>
@@ -184,9 +219,14 @@ impl Debug for Packet {
 			Self::LoginCompression(packet) => write!(f, "{:?}", packet),
 			Self::LoginSuccess(packet) => write!(f, "{:?}", packet),
 			Self::PlayTeleportConfirm(packet) => write!(f, "{:?}", packet),
+			Self::PlayChatMessage(packet) => write!(f, "{:?}", packet),
 			Self::PlayClientSettings(packet) => write!(f, "{:?}", packet),
 			Self::PlayPluginMessageClient(packet) => write!(f, "{:?}", packet),
+			Self::PlayPlayerPositionClient(packet) => write!(f, "{:?}", packet),
 			Self::PlayPlayerPositionRotationClient(packet) => write!(f, "{:?}", packet),
+			Self::PlayPlayerRotationClient(packet) => write!(f, "{:?}", packet),
+			Self::PlayPlayerAbilities(packet) => write!(f, "{:?}", packet),
+			Self::PlayChunkData(packet) => write!(f, "{:?}", packet),
 			Self::PlayJoinGame(packet) => write!(f, "{:?}", packet),
 			Self::PlayPlayerPositionRotationServer(packet) => write!(f, "{:?}", packet)
 		}
@@ -487,6 +527,29 @@ impl Into<Packet> for PlayTeleportConfirm {
 }
 
 #[derive(Clone, Debug)]
+pub struct PlayChatMessage(pub String);
+
+impl PacketLiterate for PlayChatMessage {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 3;
+
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self(reader.string()?.0).into())
+	}
+}
+
+impl Into<Packet> for PlayChatMessage {
+	fn into(self) -> Packet {
+		Packet::PlayChatMessage(self)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct PlayClientSettings {
 	pub locale: String,
 	pub view_distance: u8,
@@ -557,6 +620,39 @@ impl Into<Packet> for PlayPluginMessageClient {
 }
 
 #[derive(Clone, Debug)]
+pub struct PlayPlayerPositionClient {
+	pub x: f64,
+	pub y_feet: f64,
+	pub z: f64,
+	pub grounded: bool
+}
+
+impl PacketLiterate for PlayPlayerPositionClient {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 18;
+
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self {
+			x: reader.double()?,
+			y_feet: reader.double()?,
+			z: reader.double()?,
+			grounded: reader.bool()?
+		}.into())
+	}
+}
+
+impl Into<Packet> for PlayPlayerPositionClient {
+	fn into(self) -> Packet {
+		Packet::PlayPlayerPositionClient(self)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct PlayPlayerPositionRotationClient {
 	pub x: f64,
 	pub y_feet: f64,
@@ -590,6 +686,100 @@ impl PacketLiterate for PlayPlayerPositionRotationClient {
 impl Into<Packet> for PlayPlayerPositionRotationClient {
 	fn into(self) -> Packet {
 		Packet::PlayPlayerPositionRotationClient(self)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayPlayerRotationClient {
+	pub yaw: f32,
+	pub pitch: f32,
+	pub grounded: bool
+}
+
+impl PacketLiterate for PlayPlayerRotationClient {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 20;
+
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self {
+			yaw: reader.float()?,
+			pitch: reader.float()?,
+			grounded: reader.bool()?
+		}.into())
+	}
+}
+
+impl Into<Packet> for PlayPlayerRotationClient {
+	fn into(self) -> Packet {
+		Packet::PlayPlayerRotationClient(self)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayPlayerAbilities(u8);
+
+impl PacketLiterate for PlayPlayerAbilities {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Server;
+	const PACKET_ID: u32 = 26;
+
+	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
+		todo!()
+	}
+
+	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
+		Ok(Self(reader.byte()? as u8).into())
+	}
+}
+
+impl Into<Packet> for PlayPlayerAbilities {
+	fn into(self) -> Packet {
+		Packet::PlayPlayerAbilities(self)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayChunkData {
+	pub position: (i64, i64),
+	//chunk_mask: u16,
+	pub height_map: HeightMap
+}
+
+impl PacketLiterate for PlayChunkData {
+	const PACKET_STATE: State = State::Play;
+	const PACKET_BOUND: Bound = Bound::Client;
+	const PACKET_ID: u32 = 32;
+
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		writer.int(self.position.0 as i32)?;
+		writer.int(self.position.1 as i32)?;
+		writer.bool(true)?;
+		writer.variable_integer(0)?;
+		writer.nbt(&self.height_map, "")?;
+		writer.variable_integer(1024)?;
+		(0..1024).try_for_each(|_| {
+			writer.variable_integer(0)
+		})?;
+		println!("bruh");
+		writer.variable_integer(0)?;
+		// no data
+		writer.variable_integer(0)
+		// no block entities
+	}
+
+	fn deserialize(_len: usize, _reader: &mut impl Read) -> Result<Packet> {
+		todo!()
+	}
+}
+
+impl Into<Packet> for PlayChunkData {
+	fn into(self) -> Packet {
+		Packet::PlayChunkData(self)
 	}
 }
 
@@ -844,4 +1034,10 @@ impl Serialize for DimensionCodec {
 		map.serialize_entry(BIOME, &Category(BIOME, &self.biomes))?;
 		map.end()
 	}
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct HeightMap {
+	#[serde(rename = "MOTION_BLOCKING")]
+	pub height_map: Vec<u64>
 }

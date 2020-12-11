@@ -9,7 +9,7 @@ fn main() {
 
 	let java_intake = server.clone();
 	thread(move || {
-		run_server(java_intake, "127.0.0.1:25565");
+		run_server(java_intake, "0.0.0.0:25565");
 	});
 
 	server.run();

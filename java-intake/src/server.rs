@@ -6,9 +6,11 @@ use self::super::{
 		StatusPong,
 		LoginStart,
 		LoginSuccess,
+		PlayChunkData,
 		PlayJoinGame,
 		PlayPlayerPositionRotationServer,
 
+		HeightMap,
 		Dimension,
 		Biome,
 		DimensionCodec
@@ -18,31 +20,58 @@ use self::super::{
 use hermaphrodite::interface::MinecraftServer;
 use maplit::hashmap;
 use std::{
-	io::{Error, ErrorKind, Result}, sync::Arc,
+	io::{Error, ErrorKind, Result},
+	sync::{Arc, mpsc::{Receiver, TryRecvError, channel}},
+	time::Duration,
+	thread::{spawn as thread, sleep},
 	net::{TcpListener, ToSocketAddrs}
 };
 
 pub fn run_server<'s, S>(server: Arc<S>, address: impl ToSocketAddrs)
-		where S: MinecraftServer<'s> {
+		where S: MinecraftServer<'s> + 'static {
 	let socket = TcpListener::bind(address).unwrap();
-
-	let mut socket = Socket::new(socket.accept().unwrap().0);
+	let (sender, receiver) = channel();
+	let client_server = server.clone();
+	thread(move || run_clients(client_server, receiver));
 
 	loop {
-		socket.recv().unwrap().into_iter()
-			.try_for_each(|packet| process_packet(packet, &mut socket, &*server))
-				.unwrap()
+		let client = socket.accept().unwrap().0;
+		sender.send(Socket::new(client)).unwrap()
 	}
 }
 
-pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
-		server: &S) -> Result<()> where S: MinecraftServer<'s> {
+pub fn run_clients<'s, S>(server: Arc<S>, incoming: Receiver<Socket>)
+		where S: MinecraftServer<'s> + 'static {
+	let mut sockets = Vec::new();
+
+	loop {
+		match incoming.try_recv() {
+			Err(TryRecvError::Disconnected) => panic!(),
+			Ok(socket) => sockets.push(socket),
+			_ => ()
+		}
+
+		sockets.iter_mut().try_for_each(|socket| {
+			socket.recv().map_err(|error| error.0)?.into_iter()
+				.try_for_each(|packet| process_packet(packet, socket, &*server))
+		}).unwrap();
+
+		sleep(Duration::from_micros(1))
+	}
+}
+
+pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket, server: &S)
+		-> Result<()> where S: MinecraftServer<'s> {
 	match packet {
 		Packet::Handshake(_)
 			| Packet::PlayClientSettings(_)
 			| Packet::PlayPluginMessageClient(_)
 			| Packet::PlayTeleportConfirm(_)
-			| Packet::PlayPlayerPositionRotationClient(_) =>
+			| Packet::PlayChatMessage(_)
+			| Packet::PlayPlayerPositionClient(_)
+			| Packet::PlayPlayerPositionRotationClient(_)
+			| Packet::PlayPlayerRotationClient(_)
+			| Packet::PlayPlayerAbilities(_) =>
 				Ok(()),
 		Packet::StatusRequest(_) => socket.send(vec![
 			StatusResponse {
@@ -84,13 +113,24 @@ pub fn process_packet<'s, S>(packet: Packet, socket: &mut Socket,
 					dimension_codec
 				}.into(),
 				PlayPlayerPositionRotationServer {
-					x: 0.,
-					y: 0.,
-					z: 0.,
+					x: 8.,
+					y: 1000.,
+					z: 8.,
 					yaw: 0.,
 					pitch: 0.,
 					flags: 0,
 					teleport_id: 0
+				}.into()
+			])?;
+
+
+			std::thread::sleep(std::time::Duration::from_secs(2));
+			socket.send(vec![
+				PlayChunkData {
+					position: (0, 0),
+					height_map: HeightMap {
+						height_map: vec![0; 36]
+					}
 				}.into()
 			])
 		},

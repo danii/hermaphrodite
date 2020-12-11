@@ -20,7 +20,7 @@ impl Socket {
 
 		Self {
 			socket,
-			bound: Bound::Client,
+			bound: Bound::Server,
 			_compression: None,
 			state: State::Handshake,
 			read_buffer: ReadBuffer::new()
