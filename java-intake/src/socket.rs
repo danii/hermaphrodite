@@ -20,7 +20,7 @@ impl Socket {
 
 		Self {
 			socket,
-			bound: Bound::Server,
+			bound: Bound::Client,
 			_compression: None,
 			state: State::Handshake,
 			read_buffer: ReadBuffer::new()
@@ -110,7 +110,7 @@ impl Socket {
 /// While this is meant to be used as a buffer, data has to be written manually
 /// to it via the Write implementation.
 #[derive(Debug)]
-struct ReadBuffer(VecDeque<u8>, usize);
+pub struct ReadBuffer(VecDeque<u8>, usize);
 
 impl ReadBuffer {
 	fn new() -> Self {

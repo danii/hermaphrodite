@@ -205,8 +205,16 @@ impl PacketLiterate for Handshake {
 	const PACKET_BOUND: Bound = Bound::Server;
 	const PACKET_ID: u32 = 0;
 
-	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
-		todo!()
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		writer.variable_integer(self.protocol_version as i32)?;
+		writer.string(&self.address.0)?;
+		writer.unsigned_short(self.address.1)?;
+		writer.variable_integer(match self.next_state {
+			State::Status => 1,
+			State::Login => 2,
+			state => return Err(Error::new(ErrorKind::InvalidInput,
+				format!("Expected Status or Login, found {:?}.", state)))
+		})
 	}
 
 	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {
@@ -386,8 +394,8 @@ impl PacketLiterate for LoginStart {
 	const PACKET_BOUND: Bound = Bound::Server;
 	const PACKET_ID: u32 = 0;
 
-	fn serialize(&self, _writer: &mut impl Write) -> Result<()> {
-		todo!()
+	fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+		writer.string(&self.0)
 	}
 
 	fn deserialize(_len: usize, reader: &mut impl Read) -> Result<Packet> {

@@ -1,54 +1,21 @@
-/*struct Stuff {
-	last: Instant,
-	duration: Duration
-}
-
-fn tick(this: &mut Stuff) {
-	let now = Instant::now();
-	let time_passed = now - this.last;
-	let mut skip_ticks = false;
-
-	match this.duration.checked_sub(time_passed) {
-		Some(time) => {
-			// We're on time.
-
-			println!("Tick done in {}ms.", time_passed.as_micros());
-			sleep(time);
-		},
-		None => match this.duration.checked_sub(time_passed - this.duration) {
-			Some(time) => {
-				// We're behind!
-
-				let time = this.duration - time;
-				println!("Tick done in {}ms, {}ms behind. Continuing without intervention.", time_passed.as_millis(), time.as_millis());
-			},
-			None => {
-				// We're severly behind!!!
-
-				let time = time_passed - this.duration;
-				let ticks_skipped = time.as_secs_f32() / this.duration.as_secs_f32();
-				println!("Tick done in {}ms, {}ms behind. Skipping approximately {} ticks.", time_passed.as_millis(), time.as_millis(), ticks_skipped);
-
-				skip_ticks = true;
-			}
-		}
-	}
-
-	if skip_ticks {this.last = Instant::now()}
-	else {this.last = this.last + this.duration}
-}*/
-
-use self::super::{interface::{Event, MinecraftServer}, util::{GenericTraitObject, generic_trait, generic_trait_downcast}};
+use self::super::{
+	interface::{Event, MinecraftServer},
+	util::{GenericTraitObject, generic_trait_downcast, generic_trait}
+};
 use bit_range::BitRange;
-use std::{any::{Any, TypeId}, collections::{HashMap, HashSet}, sync::Mutex};
+use std::{
+	any::TypeId, borrow::Borrow, collections::{HashSet, HashMap},
+	hash::{Hash, Hasher}, sync::Mutex, thread::sleep, time::{Duration, Instant}
+};
 
 pub struct Server<'l> {
 	event_listeners: Mutex<HashMap<TypeId, Vec<GenericTraitObject<'l>>>>,
-	entities: Mutex<HashSet<Player>>
+	entities: Mutex<HashSet<Player>>,
+	chunks: Mutex<HashSet<Chunk>>
 	//orphanned_connections: Vec<()>,
-	//loaded_chunks: HashMap<(u64, u64), Chunk>
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Player {
 	username: Box<str>,
 	x: (u64, u16),
@@ -56,30 +23,62 @@ pub struct Player {
 	z: (u64, u16)
 }
 
-impl std::hash::Hash for Player {
-	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-		state.write_u8(0)
+impl Hash for Player {
+	fn hash<H>(&self, hasher: &mut H)
+			where H: Hasher {
+		hasher.write_u8(0)
 	}
 }
-
-impl std::cmp::PartialEq for Player {
-	fn eq(&self, _other: &Self) -> bool {
-		true
-	}
-}
-
-impl std::cmp::Eq for Player {}
 
 impl<'l> Server<'l> {
 	pub fn new() -> Self {
 		Self {
 			event_listeners: Mutex::new(HashMap::new()),
-			entities: Mutex::new(HashSet::new())
+			entities: Mutex::new(HashSet::new()),
+			chunks: Mutex::new(HashSet::new())
+		}
+	}
+
+	pub fn run(&self) {
+		let duration = Duration::from_nanos(1_000_000_000 / 1);
+		println!("Running @{:?}/Tick", duration);
+
+		loop {
+			let then = Instant::now();
+
+			self.tick();
+
+			let elapsed = Instant::now() - then;
+			match duration.checked_sub(elapsed) {
+				Some(time) => {
+					// We're on time.
+
+					println!("Tick completed in {:?}.", elapsed);
+					sleep(time);
+				},
+				None => panic!()
+			}
 		}
 	}
 
 	fn tick(&self) {
+		self.manage_chunks();
+	}
 
+	fn manage_chunks(&self) {
+		let players = self.entities.lock().unwrap();
+		let mut chunks = self.chunks.lock().unwrap();
+
+		//let render_distance = 2;
+		//let load_max = 10000;
+		players.iter().for_each(|player| {
+			let chunk_pos = (player.x.0 / 16, player.z.0 / 16);
+
+			chunks.get_or_insert_with(&chunk_pos, |_| {
+				println!("Loaded chunk @{},{}.", chunk_pos.0, chunk_pos.1);
+				Chunk::solid(chunk_pos, 0)
+			});
+		});
 	}
 }
 
@@ -110,37 +109,54 @@ impl<'l> MinecraftServer<'l> for Server<'l> {
 				}));
 
 		event.handle(self);
-	 }
-	 
-	 fn new_pov(&self, name: Box<str>) {
-			let mut entities = self.entities.lock().unwrap();
-			entities.insert(Player {
-				username: name,
-				x: (0, 0),
-				y: (0, 0),
-				z: (0, 0)
-			});
-	 }
+	}
+	
+	fn new_pov(&self, name: Box<str>) {
+		let mut entities = self.entities.lock().unwrap();
+		entities.insert(Player {
+			username: name,
+			x: (0, 0),
+			y: (0, 0),
+			z: (0, 0)
+		});
+	}
 }
 
+#[derive(Eq, PartialEq)]
 struct Chunk {
 	data: Box<[u8]>,
 	diff_source: DiffSource,
 	pallette: Option<Palette>,
 	layer_mask: u16,
+	position: (u64, u64)
 }
 
 impl Chunk {
-	fn solid(identifier: u16) -> Self {
+	fn solid(position: (u64, u64), identifier: u16) -> Self {
 		Self {
 			data: Box::new([]),
 			diff_source: DiffSource::Solid(identifier),
 			pallette: None,
-			layer_mask: 0b0000000000000000
+			layer_mask: 0b0000000000000000,
+			position
 		}
 	}
 }
 
+impl Hash for Chunk {
+	fn hash<H>(&self, hasher: &mut H)
+			where H: Hasher {
+		self.position.hash(hasher)
+	}
+}
+
+impl Borrow<(u64, u64)> for Chunk {
+	fn borrow(&self) -> &(u64, u64) {
+		&self.position
+	}
+}
+
+#[derive(Eq, PartialEq)]
 struct Palette(u16, Box<[u8]>);
 
 impl Palette {
@@ -155,6 +171,7 @@ impl Palette {
 	}
 }
 
+#[derive(Eq, PartialEq)]
 enum DiffSource {
 	Generator(Option<u64>),
 	Solid(u16)

@@ -16,3 +16,5 @@ pub struct GenericTraitObject<'p> {
 	pub trait_object: TraitObject,
 	pub phantom: PhantomData<&'p ()>
 }
+
+unsafe impl<'p> Send for GenericTraitObject<'p> {}

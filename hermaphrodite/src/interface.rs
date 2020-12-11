@@ -13,6 +13,10 @@ pub trait MinecraftServer<'l> {
 	fn new_pov(&self, name: Box<str>);
 }
 
+pub trait ChunkFetcher {
+	
+}
+
 pub trait Event {
 	type Intent;
 
